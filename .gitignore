@@ -1,0 +1,23 @@
+# Rust
+/target/
+**/*.rs.bk
+
+# Python (brand build scripts)
+__pycache__/
+*.pyc
+.venv/
+
+# Node (website, TypeScript tooling)
+node_modules/
+
+# Editors and OS
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Office lock files
+~$*
