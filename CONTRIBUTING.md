@@ -17,7 +17,7 @@ Good ways to help right now:
 
 ## Getting started
 
-You need [Rust](https://rustup.rs) 1.88 or newer.
+You need [rustup](https://rustup.rs). The Rust version is pinned in `rust-toolchain.toml` and installs automatically on the first build, so your checks match the release workflow exactly.
 
 ```sh
 git clone https://github.com/emmanuelekopimo/fanimate

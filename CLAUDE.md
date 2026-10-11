@@ -109,6 +109,7 @@ pnpm release --dry-run                        # what a release would do
 ## Code conventions
 
 - Rust edition 2024, `rustfmt.toml` (max width 110). `cargo clippy -D warnings` must pass. `unsafe` is denied workspace-wide; do not add it.
+- **The Rust version is pinned in `rust-toolchain.toml`** and the release workflow installs exactly that version. Never switch CI back to "latest stable": new Rust releases add clippy lints, and an unpinned CI fails on code that passed locally. To upgrade, bump the pin, run clippy and the tests, fix, and commit in one change.
 - Match the surrounding code: comment density, naming and idioms. Comments explain **why**, not what. Module docs say what the module is for.
 - No placeholder code: no `let _ = SomeType::X;` to silence imports, no dead branches, no `todo!()` in shipped paths. Remove unused imports instead.
 - Errors: libraries return typed errors (`thiserror`); the app shows them in the status bar or a dialog. Never `unwrap` on user data or IO.

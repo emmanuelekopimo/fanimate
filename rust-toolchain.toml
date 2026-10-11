@@ -1,0 +1,8 @@
+# One Rust version for everyone: local builds, `pnpm release` and the release
+# workflow. New Rust versions add clippy lints, so an unpinned CI fails on
+# code that passed locally. Upgrade deliberately: bump this, run
+# `cargo clippy --workspace --all-targets -- -D warnings`, fix, commit.
+[toolchain]
+channel = "1.99"
+components = ["clippy", "rustfmt"]
+targets = ["wasm32-unknown-unknown"]

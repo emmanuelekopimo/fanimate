@@ -181,7 +181,7 @@ pub fn render_to_rgba(
 
 /// The GPU blends premultiplied; image files expect straight alpha.
 fn unpremultiply(rgba: &mut [u8]) {
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         let a = px[3];
         if a != 0 && a != 255 {
             for c in &mut px[..3] {
