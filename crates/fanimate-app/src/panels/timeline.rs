@@ -6,6 +6,7 @@ use fanimate_core::{Frame, LayerId};
 use fanimate_editor::{Action, SelectMode};
 
 use crate::app::Shell;
+use crate::icons::{self, Icon};
 use crate::menus;
 
 const NAMES_WIDTH: f32 = 170.0;
@@ -255,18 +256,27 @@ fn transport(ui: &mut egui::Ui, shell: &mut Shell) {
                 format!("{} ({s})", a.label())
             }
         };
-        let play = if shell.editor.playing { "⏸" } else { "⏵" };
-        for (glyph, action) in [
-            ("⏮", Action::FirstFrame),
-            ("|⏴", Action::PrevFrame),
+        ui.spacing_mut().item_spacing.x = 2.0;
+        let play = if shell.editor.playing {
+            Icon::Pause
+        } else {
+            Icon::Play
+        };
+        for (icon, action) in [
+            (Icon::FirstFrame, Action::FirstFrame),
+            (Icon::PrevFrame, Action::PrevFrame),
             (play, Action::PlayPause),
-            ("⏵|", Action::NextFrame),
-            ("⏭", Action::LastFrame),
+            (Icon::NextFrame, Action::NextFrame),
+            (Icon::LastFrame, Action::LastFrame),
         ] {
-            if ui.button(glyph).on_hover_text(tip(shell, action)).clicked() {
+            if icons::button(ui, icon, 24.0, false, false)
+                .on_hover_text(tip(shell, action))
+                .clicked()
+            {
                 shell.pending.push(action);
             }
         }
+        ui.spacing_mut().item_spacing.x = 6.0;
         ui.separator();
         ui.label("Frame");
         let mut f = shell.editor.current_frame();
@@ -282,11 +292,15 @@ fn transport(ui: &mut egui::Ui, shell: &mut Shell) {
                 .color(shell.palette.text_muted),
         );
         ui.separator();
-        for (glyph, action) in [("◆+", Action::AddKey), ("◆−", Action::DeleteKey)] {
-            if ui
-                .add_enabled(shell.editor.can_run(action), egui::Button::new(glyph))
+        for (icon, action) in [
+            (Icon::AddKey, Action::AddKey),
+            (Icon::DeleteKey, Action::DeleteKey),
+        ] {
+            let enabled = shell.editor.can_run(action);
+            if icons::button(ui, icon, 24.0, false, !enabled)
                 .on_hover_text(tip(shell, action))
                 .clicked()
+                && enabled
             {
                 shell.pending.push(action);
             }

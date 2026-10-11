@@ -21,6 +21,22 @@ pub fn context_menu(response: &egui::Response, contents: impl FnOnce(&mut egui::
         });
 }
 
+/// A button that opens a menu, styled like the menu bar's menus.
+pub fn menu_button(
+    ui: &mut egui::Ui,
+    button: egui::Button<'_>,
+    contents: impl FnOnce(&mut egui::Ui),
+) -> egui::Response {
+    let config = egui::containers::menu::MenuConfig::new().style(theme::menu_style);
+    egui::containers::menu::MenuButton::from_button(button)
+        .config(config)
+        .ui(ui, |ui| {
+            ui.set_min_width(MENU_MIN_WIDTH);
+            contents(ui);
+        })
+        .0
+}
+
 /// A menu item that queues `action`, shows its shortcut from the active
 /// keymap, and is greyed out when it cannot run.
 pub fn item(ui: &mut egui::Ui, shell: &mut Shell, action: Action) {

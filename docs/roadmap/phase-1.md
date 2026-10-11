@@ -41,6 +41,7 @@ Companion to the [product vision](../product-vision.md). The brand assets propos
   - Canvas: pan, zoom about the pointer, fit, 100%, click to select, Transform Layer tool, selection outlines and bone overlay
   - Timeline: transport, scrubbable ruler with seconds markers, keyframe diamonds per layer, add and delete keys, keyframe navigation
   - Undo and redo for every edit (snapshot history; per-object history comes in M2), command palette, four brand themes, unsaved-changes prompts
+  - Native feel: no console window on Windows, a menu bar that switches menus on hover, native cursors, labels that are not selectable, rename fields that commit when you click away, crisp Lucide icons, and a maximised window that leaves an auto-hiding taskbar, Alt+Tab previews and screen capture working
 - [ ] Drawing and bone tools (shown in the Tools panel, marked with the milestone that brings them: M2 and M3)
 - [ ] Browser build of the app itself
 - [ ] Benchmark on macOS and Linux hardware, and choose the reference laptop

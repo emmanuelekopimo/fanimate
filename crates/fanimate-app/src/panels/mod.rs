@@ -14,6 +14,7 @@ use fanimate_editor::StatusKind;
 use serde::{Deserialize, Serialize};
 
 use crate::app::Shell;
+use crate::icons::{self, Icon};
 
 const STATUS_TIMEOUT: Duration = Duration::from_secs(6);
 
@@ -145,11 +146,12 @@ pub fn status_bar(ui: &mut egui::Ui, shell: &mut Shell) {
                     let muted = |s: String| RichText::new(s).size(12.0).color(p.text_muted);
                     ui.label(muted(shell.gpu_name.clone()));
                     ui.separator();
+                    let keyboard = icons::image(ui.ctx(), Icon::Keyboard, 14.0, p.text_muted);
+                    let keymap =
+                        egui::Button::image_and_text(keyboard, muted(shell.keymap.kind.label().into()))
+                            .frame_when_inactive(false);
                     if ui
-                        .add(
-                            egui::Label::new(muted(format!("⌨ {}", shell.keymap.kind.label())))
-                                .sense(egui::Sense::click()),
-                        )
+                        .add(keymap)
                         .on_hover_text("Keyboard shortcuts. Click to change.")
                         .clicked()
                     {

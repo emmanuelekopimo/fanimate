@@ -80,7 +80,9 @@ fn toolbar(ui: &mut egui::Ui, shell: &mut Shell) {
                 format!("{} ({s})", a.label())
             }
         };
-        ui.menu_button("+ New", |ui| {
+        let text = shell.palette.text;
+        let new = egui::Button::image_and_text(icons::image(ui.ctx(), Icon::Add, 16.0, text), "New");
+        menus::menu_button(ui, new, |ui| {
             menus::item(ui, shell, Action::NewVectorLayer);
             menus::item(ui, shell, Action::NewGroupLayer);
             menus::item(ui, shell, Action::NewBoneLayer);
@@ -141,7 +143,7 @@ fn row(ui: &mut egui::Ui, shell: &mut Shell, id: LayerId, depth: usize) {
     let eye = ui.interact(eye_rect, Id::new(("eye", id)), Sense::click());
     icons::paint(
         &painter,
-        Rect::from_center_size(eye_rect.center(), egui::vec2(14.0, 14.0)),
+        Rect::from_center_size(eye_rect.center(), egui::vec2(16.0, 16.0)),
         if visible { Icon::Eye } else { Icon::EyeClosed },
         if visible { p.text } else { p.text_muted },
     );
@@ -154,14 +156,13 @@ fn row(ui: &mut egui::Ui, shell: &mut Shell, id: LayerId, depth: usize) {
 
     // expand arrow for groups and bone layers
     let x0 = eye_rect.right() + 4.0 + depth as f32 * INDENT;
-    let arrow_rect = Rect::from_min_size(egui::pos2(x0, rect.top()), egui::vec2(14.0, ROW_HEIGHT));
+    let arrow_rect = Rect::from_min_size(egui::pos2(x0, rect.top()), egui::vec2(16.0, ROW_HEIGHT));
     if is_container {
         let arrow = ui.interact(arrow_rect, Id::new(("arrow", id)), Sense::click());
-        painter.text(
-            arrow_rect.center(),
-            egui::Align2::CENTER_CENTER,
-            if collapsed { "⏵" } else { "⏷" },
-            egui::FontId::proportional(11.0),
+        icons::paint(
+            &painter,
+            Rect::from_center_size(arrow_rect.center(), egui::vec2(16.0, 16.0)),
+            if collapsed { Icon::Expand } else { Icon::Collapse },
             p.text_muted,
         );
         if arrow.clicked() {
@@ -176,14 +177,14 @@ fn row(ui: &mut egui::Ui, shell: &mut Shell, id: LayerId, depth: usize) {
         &painter,
         Rect::from_center_size(
             egui::pos2(arrow_rect.right() + 10.0, rect.center().y),
-            egui::vec2(13.0, 13.0),
+            egui::vec2(16.0, 16.0),
         ),
         kind_icon,
         p.text_muted,
     );
 
     // name, or the rename field
-    let name_rect = Rect::from_min_max(egui::pos2(arrow_rect.right() + 22.0, rect.top()), rect.max);
+    let name_rect = Rect::from_min_max(egui::pos2(arrow_rect.right() + 24.0, rect.top()), rect.max);
     let renaming = shell.ui.renaming.as_ref().is_some_and(|(r, _)| *r == id);
     if renaming {
         let mut child =

@@ -135,7 +135,7 @@ From the [brand asset checklist](../docs/roadmap/phase-1.md#17-brand-asset-check
 
 - [x] Trademark and domain check for the name
 - [ ] Splash screen and about dialog (onion-skin F illustration, as on the social card)
-- [ ] Interface icon set v1 (about 120 icons). The first 20 (tools, layer types, layer actions, visibility) are drawn in code in `crates/fanimate-app/src/icons.rs`
+- [ ] Interface icon set v1 (about 120 icons). Interface icons come from [Lucide](https://lucide.dev) (ISC licence), in `crates/fanimate-app/icons/lucide/`; the bone tools, which Lucide lacks, are drawn in Lucide's style in `crates/fanimate-app/icons/fanimate/`. About 35 are in use so far
 - [ ] Installer art (Windows banner, macOS DMG background, Flatpak metadata)
 - [ ] Add JetBrains Mono to `fonts/`
 - [ ] Optional: a mascot rigged in Fanimate

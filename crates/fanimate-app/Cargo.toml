@@ -28,6 +28,8 @@ serde_json.workspace = true
 eframe = { version = "0.36", default-features = false, features = ["wgpu", "default_fonts", "accesskit", "wayland", "x11", "persistence"] }
 egui_dock = { version = "0.21", features = ["serde"] }
 rfd = "0.17"
+# SVG icons only: no text, fonts or embedded images
+resvg = { version = "0.48", default-features = false }
 
 [lints]
 workspace = true

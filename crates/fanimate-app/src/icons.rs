@@ -1,236 +1,167 @@
-//! Interface icons drawn with vector strokes, so they never depend on a
-//! font having the right glyph and they match at every size and theme.
-//! Style follows the brand icon spec: rounded strokes on a square grid.
+//! Interface icons: [Lucide](https://lucide.dev) SVGs (ISC licence) in
+//! `icons/lucide/`, plus bone-tool icons drawn in the same style in
+//! `icons/fanimate/`. Never font glyphs or emoji: egui's fonts lack many
+//! symbols and they render as empty boxes.
+//!
+//! Each icon is rasterised once per pixel size with resvg, in white, and
+//! tinted when painted, so it is sharp at every display scale and follows
+//! the theme. Painting snaps the icon to the pixel grid so 2 px strokes land
+//! on whole pixels instead of blurring across three.
 
-use eframe::egui::{self, Color32, Painter, Pos2, Rect, Sense, Shape, Stroke, pos2, vec2};
+use std::collections::HashMap;
+
+use eframe::egui::{self, Color32, ColorImage, Painter, Rect, Sense, TextureHandle, TextureId, pos2, vec2};
 use fanimate_editor::Tool;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Icon {
     Tool(Tool),
     VectorLayer,
     GroupLayer,
     BoneLayer,
+    Add,
     Duplicate,
     Delete,
     Up,
     Down,
     Eye,
     EyeClosed,
+    Expand,
+    Collapse,
+    FirstFrame,
+    PrevFrame,
+    Play,
+    Pause,
+    NextFrame,
+    LastFrame,
+    AddKey,
+    DeleteKey,
+    Keyboard,
 }
 
-/// Draw `icon` centred in `rect`.
-pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
-    let s = rect.width().min(rect.height()) * 0.5 - 1.0; // half size
-    let c = rect.center();
-    let at = |x: f32, y: f32| pos2(c.x + x * s, c.y + y * s);
-    let st = Stroke::new((s * 0.16).clamp(1.2, 2.0), color);
-    let line = |a: Pos2, b: Pos2| p.line_segment([a, b], st);
-    let poly = |pts: Vec<Pos2>, closed: bool| {
-        if closed {
-            p.add(Shape::closed_line(pts, st));
-        } else {
-            p.add(Shape::line(pts, st));
-        }
+macro_rules! lucide {
+    ($name:literal) => {
+        include_str!(concat!("../icons/lucide/", $name, ".svg"))
     };
-    let dot = |q: Pos2, r: f32| p.circle_filled(q, r * s, color);
-    let ring = |q: Pos2, r: f32| p.circle_stroke(q, r * s, st);
-    let bone = |a: Pos2, b: Pos2| {
-        // a tapered bone: joint circle and two lines to the tip
-        let d = (b - a).normalized();
-        let n = vec2(-d.y, d.x) * 0.22 * s;
-        ring(a, 0.22);
-        poly(vec![a + n + d * 0.2 * s, b, a - n + d * 0.2 * s], false);
-    };
-    let arrow = |a: Pos2, b: Pos2| {
-        line(a, b);
-        let d = (b - a).normalized() * 0.3 * s;
-        let n = vec2(-d.y, d.x);
-        poly(vec![b - d + n, b, b - d - n], false);
-    };
+}
 
-    match icon {
-        Icon::Tool(Tool::SelectPoints) => {
-            for (x, y) in [(-0.6, -0.6), (0.6, -0.6), (0.6, 0.6), (-0.6, 0.6)] {
-                p.rect_filled(
-                    Rect::from_center_size(at(x, y), vec2(0.3 * s, 0.3 * s)),
-                    1.0,
-                    color,
-                );
-            }
-            poly(
-                vec![at(-0.6, -0.6), at(0.6, -0.6), at(0.6, 0.6), at(-0.6, 0.6)],
-                true,
-            );
-        }
-        Icon::Tool(Tool::TranslatePoints) => {
-            arrow(at(0.0, 0.0), at(0.0, -0.9));
-            arrow(at(0.0, 0.0), at(0.0, 0.9));
-            arrow(at(0.0, 0.0), at(-0.9, 0.0));
-            arrow(at(0.0, 0.0), at(0.9, 0.0));
-            dot(c, 0.15);
-        }
-        Icon::Tool(Tool::AddPoint) => {
-            poly(vec![at(-0.8, 0.6), at(-0.2, -0.4), at(0.3, 0.3)], false);
-            p.rect_filled(
-                Rect::from_center_size(at(-0.2, -0.4), vec2(0.3 * s, 0.3 * s)),
-                1.0,
-                color,
-            );
-            line(at(0.6, 0.2), at(0.6, 0.9));
-            line(at(0.25, 0.55), at(0.95, 0.55));
-        }
-        Icon::Tool(Tool::Freehand) => {
-            // pencil
-            poly(
-                vec![
-                    at(-0.8, 0.8),
-                    at(-0.6, 0.3),
-                    at(0.5, -0.8),
-                    at(0.8, -0.5),
-                    at(-0.3, 0.6),
-                ],
-                true,
-            );
-            line(at(-0.6, 0.3), at(-0.3, 0.6));
-        }
-        Icon::Tool(Tool::Eraser) => {
-            poly(
-                vec![at(-0.9, 0.3), at(-0.2, -0.4), at(0.4, 0.2), at(-0.3, 0.9)],
-                true,
-            );
-            poly(
-                vec![at(-0.2, -0.4), at(0.3, -0.9), at(0.9, -0.3), at(0.4, 0.2)],
-                true,
-            );
-            line(at(-0.3, 0.9), at(0.9, 0.9));
-        }
-        Icon::Tool(Tool::PaintBucket) => {
-            poly(
-                vec![at(-0.7, -0.1), at(0.0, -0.8), at(0.7, -0.1), at(0.0, 0.6)],
-                true,
-            );
-            line(at(-0.7, -0.1), at(0.7, -0.1));
-            dot(at(0.8, 0.6), 0.18);
-        }
-        Icon::Tool(Tool::Eyedropper) => {
-            line(at(-0.8, 0.8), at(0.3, -0.3));
-            ring(at(0.5, -0.5), 0.3);
-            dot(at(-0.8, 0.8), 0.12);
-        }
-        Icon::Tool(Tool::TransformLayer) => {
-            poly(
-                vec![at(-0.5, -0.5), at(0.5, -0.5), at(0.5, 0.5), at(-0.5, 0.5)],
-                true,
-            );
-            arrow(at(0.5, 0.5), at(0.95, 0.95));
-            arrow(at(-0.5, -0.5), at(-0.95, -0.95));
-        }
-        Icon::Tool(Tool::SelectBone) => {
-            bone(at(-0.6, 0.6), at(0.7, -0.7));
-            ring(at(-0.6, 0.6), 0.38);
-        }
-        Icon::Tool(Tool::AddBone) => {
-            bone(at(-0.7, 0.7), at(0.4, -0.4));
-            line(at(0.65, -0.05), at(0.65, 0.75));
-            line(at(0.25, 0.35), at(1.0, 0.35));
-        }
-        Icon::Tool(Tool::ManipulateBones) => {
-            bone(at(-0.6, 0.6), at(0.5, -0.5));
-            let arc: Vec<Pos2> = (0..=8)
-                .map(|i| {
-                    let a = 0.3 + i as f32 * 0.15;
-                    at(-0.6 + 1.2 * a.cos(), 0.6 - 1.2 * a.sin())
-                })
-                .collect();
-            let end = *arc.last().unwrap_or(&c);
-            poly(arc, false);
-            dot(end, 0.12);
-        }
-        Icon::Tool(Tool::Pan) => {
-            for (dx, dy) in [(0.0, -1.0), (0.0, 1.0), (-1.0, 0.0), (1.0, 0.0)] {
-                arrow(at(dx * 0.25, dy * 0.25), at(dx * 0.95, dy * 0.95));
-            }
-            ring(c, 0.18);
-        }
-        Icon::Tool(Tool::Zoom) => {
-            ring(at(-0.2, -0.2), 0.55);
-            line(at(0.2, 0.2), at(0.85, 0.85));
-        }
-        Icon::VectorLayer => {
-            // pen nib
-            poly(
-                vec![at(0.0, -0.9), at(0.6, 0.0), at(0.0, 0.9), at(-0.6, 0.0)],
-                true,
-            );
-            line(at(0.0, -0.9), at(0.0, 0.2));
-            dot(at(0.0, 0.2), 0.12);
-        }
-        Icon::GroupLayer => {
-            poly(
-                vec![
-                    at(-0.9, -0.6),
-                    at(-0.3, -0.6),
-                    at(-0.1, -0.35),
-                    at(0.9, -0.35),
-                    at(0.9, 0.7),
-                    at(-0.9, 0.7),
-                ],
-                true,
-            );
-        }
-        Icon::BoneLayer => bone(at(-0.6, 0.6), at(0.8, -0.8)),
-        Icon::Duplicate => {
-            poly(
-                vec![at(-0.8, -0.3), at(0.3, -0.3), at(0.3, 0.8), at(-0.8, 0.8)],
-                true,
-            );
-            poly(
-                vec![
-                    at(-0.3, -0.3),
-                    at(-0.3, -0.8),
-                    at(0.8, -0.8),
-                    at(0.8, 0.3),
-                    at(0.3, 0.3),
-                ],
-                false,
-            );
-        }
-        Icon::Delete => {
-            line(at(-0.8, -0.55), at(0.8, -0.55));
-            poly(
-                vec![at(-0.3, -0.55), at(-0.3, -0.85), at(0.3, -0.85), at(0.3, -0.55)],
-                false,
-            );
-            poly(
-                vec![at(-0.6, -0.55), at(-0.45, 0.9), at(0.45, 0.9), at(0.6, -0.55)],
-                false,
-            );
-        }
-        Icon::Up => arrow(at(0.0, 0.8), at(0.0, -0.8)),
-        Icon::Down => arrow(at(0.0, -0.8), at(0.0, 0.8)),
-        Icon::Eye | Icon::EyeClosed => {
-            let upper: Vec<Pos2> = (0..=10)
-                .map(|i| {
-                    let t = i as f32 / 10.0 * std::f32::consts::PI;
-                    at(-0.9 * t.cos(), -0.55 * t.sin())
-                })
-                .collect();
-            if icon == Icon::Eye {
-                let lower: Vec<Pos2> = upper.iter().map(|q| pos2(q.x, c.y + (c.y - q.y))).collect();
-                poly(upper, false);
-                poly(lower, false);
-                dot(c, 0.25);
-            } else {
-                // closed lid with lashes
-                let lid: Vec<Pos2> = upper.iter().map(|q| pos2(q.x, c.y + (c.y - q.y) * 0.6)).collect();
-                for x in [-0.45, 0.0, 0.45] {
-                    line(at(x, 0.35), at(x * 1.2, 0.7));
-                }
-                poly(lid, false);
-            }
+macro_rules! own {
+    ($name:literal) => {
+        include_str!(concat!("../icons/fanimate/", $name, ".svg"))
+    };
+}
+
+impl Icon {
+    fn svg(self) -> &'static str {
+        match self {
+            Self::Tool(tool) => match tool {
+                Tool::SelectPoints => lucide!("square-dashed-mouse-pointer"),
+                Tool::TranslatePoints => lucide!("move"),
+                Tool::AddPoint => lucide!("pen-tool"),
+                Tool::Freehand => lucide!("pencil"),
+                Tool::Eraser => lucide!("eraser"),
+                Tool::PaintBucket => lucide!("paint-bucket"),
+                Tool::Eyedropper => lucide!("pipette"),
+                Tool::TransformLayer => lucide!("scaling"),
+                Tool::SelectBone => own!("bone-select"),
+                Tool::AddBone => own!("bone-plus"),
+                Tool::ManipulateBones => own!("bone-rotate"),
+                Tool::Pan => lucide!("hand"),
+                Tool::Zoom => lucide!("zoom-in"),
+            },
+            Self::VectorLayer => lucide!("vector-square"),
+            Self::GroupLayer => lucide!("folder"),
+            Self::BoneLayer => lucide!("bone"),
+            Self::Add => lucide!("plus"),
+            Self::Duplicate => lucide!("copy"),
+            Self::Delete => lucide!("trash-2"),
+            Self::Up => lucide!("arrow-up"),
+            Self::Down => lucide!("arrow-down"),
+            Self::Eye => lucide!("eye"),
+            Self::EyeClosed => lucide!("eye-off"),
+            Self::Expand => lucide!("chevron-right"),
+            Self::Collapse => lucide!("chevron-down"),
+            Self::FirstFrame => lucide!("skip-back"),
+            Self::PrevFrame => lucide!("step-back"),
+            Self::Play => lucide!("play"),
+            Self::Pause => lucide!("pause"),
+            Self::NextFrame => lucide!("step-forward"),
+            Self::LastFrame => lucide!("skip-forward"),
+            Self::AddKey => lucide!("diamond-plus"),
+            Self::DeleteKey => lucide!("diamond-minus"),
+            Self::Keyboard => lucide!("keyboard"),
         }
     }
+}
+
+/// Rasterise an icon in white at `px` by `px` pixels.
+fn rasterize(svg: &str, px: u32) -> Option<ColorImage> {
+    use resvg::{tiny_skia, usvg};
+    let svg = svg.replace("currentColor", "#ffffff");
+    let tree = usvg::Tree::from_str(&svg, &usvg::Options::default()).ok()?;
+    let mut pixmap = tiny_skia::Pixmap::new(px, px)?;
+    let scale = px as f32 / tree.size().width().max(tree.size().height());
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    Some(ColorImage::from_rgba_premultiplied(
+        [px as usize; 2],
+        pixmap.data(),
+    ))
+}
+
+type Cache = HashMap<(Icon, u32), TextureHandle>;
+
+/// The icon's texture at `px` pixels, rasterised on first use.
+fn texture(ctx: &egui::Context, icon: Icon, px: u32) -> TextureId {
+    let cache_id = egui::Id::new("fanimate-icon-cache");
+    if let Some(id) = ctx.data(|d| {
+        d.get_temp::<Cache>(cache_id)
+            .and_then(|c| c.get(&(icon, px)).map(|t| t.id()))
+    }) {
+        return id;
+    }
+    // a broken icon file shows as a blank square, never a crash; the tests
+    // check every icon renders
+    let image = rasterize(icon.svg(), px).unwrap_or_else(|| ColorImage::filled([1, 1], Color32::TRANSPARENT));
+    let handle = ctx.load_texture(format!("icon-{icon:?}-{px}"), image, egui::TextureOptions::LINEAR);
+    let id = handle.id();
+    ctx.data_mut(|d| {
+        d.get_temp_mut_or_default::<Cache>(cache_id)
+            .insert((icon, px), handle)
+    });
+    id
+}
+
+/// Draw `icon` centred in `rect`, as large as fits, in `color`.
+pub fn paint(p: &Painter, rect: Rect, icon: Icon, color: Color32) {
+    let ppp = p.ctx().pixels_per_point();
+    let px = (rect.width().min(rect.height()) * ppp).round().max(1.0) as u32;
+    let side = px as f32 / ppp;
+    // snap the top-left corner to a physical pixel
+    let min = rect.center() - vec2(side, side) / 2.0;
+    let min = pos2((min.x * ppp).round() / ppp, (min.y * ppp).round() / ppp);
+    let uv = Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0));
+    p.image(
+        texture(p.ctx(), icon, px),
+        Rect::from_min_size(min, vec2(side, side)),
+        uv,
+        color,
+    );
+}
+
+/// The icon as an [`egui::Image`], for buttons that combine an icon and text.
+pub fn image(ctx: &egui::Context, icon: Icon, size: f32, color: Color32) -> egui::Image<'static> {
+    let px = (size * ctx.pixels_per_point()).round().max(1.0) as u32;
+    egui::Image::from_texture((texture(ctx, icon, px), vec2(size, size))).tint(color)
+}
+
+/// Icon size inside a square button of side `size`: Lucide's 16 and 20 px
+/// grids, where its 2 px strokes read best.
+fn icon_size(size: f32) -> f32 {
+    if size >= 30.0 { 20.0 } else { 16.0 }
 }
 
 /// An icon button. `dim` draws it faded (unavailable or not yet built) but
@@ -251,10 +182,57 @@ pub fn button(ui: &mut egui::Ui, icon: Icon, size: f32, selected: bool, dim: boo
     let color = if selected {
         visuals.widgets.active.fg_stroke.color
     } else if dim {
-        visuals.weak_text_color().gamma_multiply(0.7)
+        // with the theme's text colour override, egui's weak text colour is
+        // barely dimmer; half strength reads as "not available" yet legible
+        visuals.text_color().gamma_multiply(0.45)
     } else {
         visuals.text_color()
     };
-    paint(ui.painter(), rect.shrink(size * 0.22), icon, color);
+    let inner = Rect::from_center_size(rect.center(), vec2(icon_size(size), icon_size(size)));
+    paint(ui.painter(), inner, icon, color);
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use fanimate_editor::Tool;
+
+    fn all() -> Vec<Icon> {
+        let mut icons: Vec<Icon> = Tool::ALL.into_iter().map(Icon::Tool).collect();
+        icons.extend([
+            Icon::VectorLayer,
+            Icon::GroupLayer,
+            Icon::BoneLayer,
+            Icon::Add,
+            Icon::Duplicate,
+            Icon::Delete,
+            Icon::Up,
+            Icon::Down,
+            Icon::Eye,
+            Icon::EyeClosed,
+            Icon::Expand,
+            Icon::Collapse,
+            Icon::FirstFrame,
+            Icon::PrevFrame,
+            Icon::Play,
+            Icon::Pause,
+            Icon::NextFrame,
+            Icon::LastFrame,
+            Icon::AddKey,
+            Icon::DeleteKey,
+            Icon::Keyboard,
+        ]);
+        icons
+    }
+
+    #[test]
+    fn every_icon_renders() {
+        for icon in all() {
+            let image = rasterize(icon.svg(), 16).unwrap_or_else(|| panic!("{icon:?} does not parse"));
+            assert_eq!(image.size, [16, 16]);
+            let opaque = image.pixels.iter().filter(|p| p.a() > 128).count();
+            assert!(opaque >= 8, "{icon:?} renders almost nothing ({opaque} px)");
+        }
+    }
 }

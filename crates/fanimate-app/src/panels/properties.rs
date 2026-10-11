@@ -52,6 +52,24 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
     end_edits(ui, shell);
 }
 
+/// The keyframe diamond beside an animated value (drawn, not a font glyph).
+fn key_mark(ui: &mut egui::Ui, on: bool, color: egui::Color32) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(10.0, 10.0), egui::Sense::hover());
+    if on {
+        let (c, r) = (rect.center(), 4.0);
+        ui.painter().add(egui::Shape::convex_polygon(
+            vec![
+                c + egui::vec2(0.0, -r),
+                c + egui::vec2(r, 0.0),
+                c + egui::vec2(0.0, r),
+                c + egui::vec2(-r, 0.0),
+            ],
+            color,
+            egui::Stroke::NONE,
+        ));
+    }
+}
+
 fn heading(ui: &mut egui::Ui, shell: &Shell, text: &str) {
     ui.label(RichText::new(text).strong().color(shell.palette.text));
     ui.add_space(2.0);
@@ -76,7 +94,6 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
     );
     let muted = shell.palette.text_muted;
     let key_color = shell.palette.keyframe;
-    let key_mark = move |on: bool| RichText::new(if on { "◆" } else { " " }).color(key_color);
 
     heading(ui, shell, kind);
     egui::Grid::new("layer-props")
@@ -109,7 +126,7 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
                 begin_edit(shell, &r, "Change opacity");
                 shell.editor.set_layer_opacity(id, opacity / 100.0);
             }
-            ui.label(key_mark(animated.3));
+            key_mark(ui, animated.3, key_color);
             ui.end_row();
 
             ui.label("Position");
@@ -122,7 +139,7 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
                     }
                 }
             });
-            ui.label(key_mark(animated.0));
+            key_mark(ui, animated.0, key_color);
             ui.end_row();
 
             ui.label("Rotation");
@@ -137,7 +154,7 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
                 t.rotation = deg.to_radians();
                 changed = Some(r);
             }
-            ui.label(key_mark(animated.1));
+            key_mark(ui, animated.1, key_color);
             ui.end_row();
 
             ui.label("Scale");
@@ -151,7 +168,7 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
                 }
                 t.scale = pct / 100.0;
             });
-            ui.label(key_mark(animated.2));
+            key_mark(ui, animated.2, key_color);
             ui.end_row();
 
             if let Some(r) = changed {
@@ -161,15 +178,19 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
         });
 
     ui.add_space(6.0);
-    ui.label(
-        RichText::new(format!(
-            "◆ marks animated values: editing them sets a keyframe on frame {}. \
-             Other values change for the whole animation.",
-            shell.editor.current_frame()
-        ))
-        .size(11.0)
-        .color(muted),
-    );
+    ui.horizontal_wrapped(|ui| {
+        ui.spacing_mut().item_spacing.x = 4.0;
+        key_mark(ui, true, key_color);
+        ui.label(
+            RichText::new(format!(
+                "marks animated values: editing them sets a keyframe on frame {}. \
+                 Other values change for the whole animation.",
+                shell.editor.current_frame()
+            ))
+            .size(11.0)
+            .color(muted),
+        );
+    });
     if let Some(l) = shell.editor.doc.find(id)
         && let LayerKind::Bone { skeleton, .. } = &l.kind
     {

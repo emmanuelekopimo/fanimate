@@ -106,4 +106,4 @@ at your option.
 
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in Fanimate by you, as defined in the Apache-2.0 licence, shall be dual-licensed as above, without any additional terms or conditions.
 
-The Inter font in `brand/fonts/` is licensed separately under the [SIL Open Font License 1.1](brand/fonts/Inter-OFL.txt). The Fanimate name and logo identify this project; see the [brand guidelines](brand/README.md#licence).
+The Inter font in `brand/fonts/` is licensed separately under the [SIL Open Font License 1.1](brand/fonts/Inter-OFL.txt). The interface icons in `crates/fanimate-app/icons/` come from [Lucide](https://lucide.dev) under the [ISC licence](crates/fanimate-app/icons/lucide/LICENSE). The Fanimate name and logo identify this project; see the [brand guidelines](brand/README.md#licence).
