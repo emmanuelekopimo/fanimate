@@ -6,6 +6,14 @@
 //! fanimate --bench [--bones N]   play the benchmark rig for 10 s, print fps
 //!   --no-vsync                   present as fast as possible
 //! ```
+//!
+//! On Windows this is a GUI program, so opening it shows no console window.
+//! Output (the benchmark result, `--help`) still prints when it is run from
+//! a terminal or with its output redirected, and appears in a message box
+//! when there is nowhere to print.
+
+// no console window on Windows, in any build
+#![windows_subsystem = "windows"]
 
 mod app;
 mod canvas_gpu;
@@ -21,6 +29,32 @@ use std::sync::Arc;
 
 use eframe::egui;
 use eframe::egui_wgpu::{WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew};
+
+/// Print `text`, or show it in a message box when there is no stdout (a GUI
+/// program started from Explorer or a shortcut).
+pub fn report(text: &str) {
+    if has_stdout() {
+        println!("{text}");
+    } else {
+        rfd::MessageDialog::new()
+            .set_title("Fanimate")
+            .set_description(text)
+            .set_level(rfd::MessageLevel::Info)
+            .show();
+    }
+}
+
+#[cfg(windows)]
+fn has_stdout() -> bool {
+    use std::os::windows::io::AsRawHandle;
+    // the standard library reports a missing handle as null
+    !std::io::stdout().as_raw_handle().is_null()
+}
+
+#[cfg(not(windows))]
+fn has_stdout() -> bool {
+    true
+}
 
 struct Args {
     file: Option<PathBuf>,
@@ -48,11 +82,11 @@ fn parse_args() -> Result<Args, String> {
                     .ok_or("--bones needs a number")?;
             }
             "-V" | "--version" => {
-                println!("fanimate {}", env!("CARGO_PKG_VERSION"));
+                report(&format!("fanimate {}", env!("CARGO_PKG_VERSION")));
                 std::process::exit(0);
             }
             "-h" | "--help" => {
-                println!("usage: fanimate [scene.fnm] [--bench [--bones N]] [--no-vsync]");
+                report("usage: fanimate [scene.fnm] [--bench [--bones N]] [--no-vsync]");
                 std::process::exit(0);
             }
             other if other.starts_with('-') => return Err(format!("unknown option {other}")),
@@ -70,7 +104,7 @@ fn main() -> eframe::Result {
     let args = match parse_args() {
         Ok(a) => a,
         Err(e) => {
-            eprintln!("fanimate: {e}");
+            report(&format!("fanimate: {e}"));
             std::process::exit(2);
         }
     };

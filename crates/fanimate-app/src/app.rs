@@ -3,7 +3,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use eframe::egui::{self, Key, Modifiers};
+use eframe::egui::{self, CursorIcon, Key, Modifiers};
 use egui_dock::{DockArea, DockState, NodeIndex};
 use fanimate_core::LayerId;
 use fanimate_editor::{Action, Chord, Editor, Keymap, KeymapKind, Outcome, StatusKind};
@@ -63,6 +63,8 @@ pub struct Bench {
 pub struct UiState {
     /// Layer being renamed in place, and the text so far.
     pub renaming: Option<(LayerId, String)>,
+    /// Give the rename field focus (and select its text) on the next frame.
+    pub rename_focus: bool,
     pub layer_filter: String,
     pub show_preferences: bool,
     pub show_shortcuts: bool,
@@ -86,6 +88,7 @@ pub struct UiState {
     /// Show (or reopen) a panel on the next frame.
     pub open_tab: Option<Tab>,
     pub reset_layout: bool,
+    pub window: titlebar::WindowState,
 }
 
 /// Everything except the dock layout (kept apart so the dock and its tab
@@ -247,6 +250,7 @@ impl eframe::App for FanimateApp {
         shell.editor.tick(dt);
 
         handle_close_request(&ctx, shell);
+        titlebar::track_window(&ctx, &mut shell.ui.window);
         handle_input(&ctx, shell);
 
         titlebar::show(ui, shell);
@@ -273,7 +277,8 @@ impl eframe::App for FanimateApp {
             });
 
         dialogs::show(&ctx, shell);
-        titlebar::resize_edges(&ctx);
+        titlebar::resize_edges(&ctx, &shell.ui.window);
+        native_cursors(&ctx);
 
         // run queued actions now that no widget borrows the editor
         for action in std::mem::take(&mut shell.pending) {
@@ -298,7 +303,7 @@ impl eframe::App for FanimateApp {
             }
             if b.started.elapsed() >= BENCH_DURATION {
                 let secs = b.started.elapsed().as_secs_f64();
-                println!(
+                crate::report(&format!(
                     "benchmark: {} ({} shapes) on {}\n  {:.1} fps average over {:.1} s (UI included)\n  {:.3} ms CPU per frame (evaluate + tessellate)",
                     shell.editor.doc.name,
                     shell.canvas.as_ref().map_or(0, |c| c.shapes),
@@ -306,7 +311,7 @@ impl eframe::App for FanimateApp {
                     b.frames as f64 / secs,
                     secs,
                     b.cpu.as_secs_f64() * 1000.0 / b.frames.max(1) as f64,
-                );
+                ));
                 shell.allow_close = true;
                 shell.bench = None; // report once; a frame may still run before closing
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -372,6 +377,19 @@ fn handle_close_request(ctx: &egui::Context, shell: &mut Shell) {
     }
 }
 
+/// egui and egui_dock show a grab hand over anything draggable, such as
+/// dock tabs and layer rows. Desktop apps keep the normal arrow there, and
+/// Windows has no hand cursor at all: winit substitutes the four-way move
+/// arrow, which reads as "this moves the window".
+fn native_cursors(ctx: &egui::Context) {
+    ctx.output_mut(|o| {
+        let grabbing_shows_move = cfg!(windows) && o.cursor_icon == CursorIcon::Grabbing;
+        if o.cursor_icon == CursorIcon::Grab || grabbing_shows_move {
+            o.cursor_icon = CursorIcon::Default;
+        }
+    });
+}
+
 fn any_modal_open(shell: &Shell) -> bool {
     let u = &shell.ui;
     u.palette.is_some() || u.confirm_discard.is_some() || u.show_welcome
@@ -379,8 +397,8 @@ fn any_modal_open(shell: &Shell) -> bool {
 
 /// Keyboard shortcuts and clipboard events.
 fn handle_input(ctx: &egui::Context, shell: &mut Shell) {
-    // a text field has focus or a dialog is up: keys belong to it
-    if ctx.egui_wants_keyboard_input() || any_modal_open(shell) {
+    // a text field has focus, or a dialog or menu is up: keys belong to it
+    if ctx.egui_wants_keyboard_input() || any_modal_open(shell) || egui::Popup::is_any_open(ctx) {
         return;
     }
     let events = ctx.input(|i| i.events.clone());

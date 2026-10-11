@@ -36,6 +36,9 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
 
     navigate(&ctx, &response, shell, rect, &to_doc);
     transform_tool(&ctx, &response, shell, &to_doc);
+    if response.hovered() || response.dragged() {
+        ctx.set_cursor_icon(tool_cursor(&ctx, &response, shell.editor.tool));
+    }
 
     // render the document into a texture and show it
     if let (Some(canvas), Some(rs)) = (&mut shell.canvas, &shell.render_state) {
@@ -73,7 +76,7 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
 
     overlays(ui, shell, rect, &to_screen);
 
-    response.context_menu(|ui| {
+    menus::context_menu(&response, |ui| {
         menus::item(ui, shell, Action::FitView);
         menus::item(ui, shell, Action::ActualSize);
         menus::item(ui, shell, Action::ZoomIn);
@@ -81,6 +84,22 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
         ui.separator();
         menus::layer_context(ui, shell);
     });
+}
+
+/// The pointer over the canvas says what the active tool will do.
+fn tool_cursor(ctx: &egui::Context, response: &egui::Response, tool: Tool) -> egui::CursorIcon {
+    use egui::CursorIcon;
+    if response.dragged_by(egui::PointerButton::Middle) {
+        return CursorIcon::Move;
+    }
+    match tool {
+        // Windows has no hand cursors, so panning shows the move arrows
+        Tool::Pan | Tool::TransformLayer => CursorIcon::Move,
+        Tool::Zoom if ctx.input(|i| i.modifiers.alt) => CursorIcon::ZoomOut,
+        Tool::Zoom => CursorIcon::ZoomIn,
+        // tools that arrive in later milestones do nothing here yet
+        _ => CursorIcon::NotAllowed,
+    }
 }
 
 fn navigate(

@@ -6,7 +6,20 @@ use fanimate_editor::{Action, KeymapKind, Tool};
 
 use crate::app::Shell;
 use crate::panels::Tab;
-use crate::theme::Theme;
+use crate::theme::{self, Theme};
+
+/// Menus are at least this wide, so short ones don't look like tooltips.
+pub const MENU_MIN_WIDTH: f32 = 200.0;
+
+/// The right-click menu for `response`, styled like the menu bar's menus.
+pub fn context_menu(response: &egui::Response, contents: impl FnOnce(&mut egui::Ui)) {
+    egui::Popup::context_menu(response)
+        .style(theme::menu_style)
+        .show(|ui| {
+            ui.set_min_width(MENU_MIN_WIDTH);
+            contents(ui);
+        });
+}
 
 /// A menu item that queues `action`, shows its shortcut from the active
 /// keymap, and is greyed out when it cannot run.
@@ -24,7 +37,11 @@ pub fn item(ui: &mut egui::Ui, shell: &mut Shell, action: Action) {
             .map_or("Redo".to_owned(), |l| format!("Redo {l}")),
         a => a.label().to_owned(),
     };
-    let button = egui::Button::new(label).shortcut_text(shell.keymap.shortcut_text(action));
+    // the gap applies on both sides of the stretch before the shortcut, so
+    // a long label keeps a clear 24 px from its keys
+    let button = egui::Button::new(label)
+        .shortcut_text(shell.keymap.shortcut_text(action))
+        .gap(12.0);
     if ui.add_enabled(shell.editor.can_run(action), button).clicked() {
         shell.pending.push(action);
         ui.close();
@@ -210,7 +227,7 @@ pub fn help(ui: &mut egui::Ui, shell: &mut Shell) {
     }
 }
 
-/// Right-click menu for layers (Layers panel rows and the canvas).
+/// Right-click menu contents for layers (Layers panel rows and the canvas).
 pub fn layer_context(ui: &mut egui::Ui, shell: &mut Shell) {
     ui.menu_button("New", |ui| {
         items(

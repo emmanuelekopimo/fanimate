@@ -60,7 +60,7 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
             if rest.clicked() {
                 shell.editor.selection.clear();
             }
-            rest.context_menu(|ui| {
+            menus::context_menu(&rest, |ui| {
                 menus::item(ui, shell, Action::NewVectorLayer);
                 menus::item(ui, shell, Action::NewGroupLayer);
                 menus::item(ui, shell, Action::NewBoneLayer);
@@ -189,15 +189,28 @@ fn row(ui: &mut egui::Ui, shell: &mut Shell, id: LayerId, depth: usize) {
         let mut child =
             ui.new_child(egui::UiBuilder::new().max_rect(name_rect.shrink2(egui::vec2(0.0, 2.0))));
         let (_, text) = shell.ui.renaming.as_mut().expect("checked above");
-        let edit = child.add(egui::TextEdit::singleline(text).desired_width(f32::INFINITY));
-        edit.request_focus();
-        let enter = child.input(|i| i.key_pressed(egui::Key::Enter));
+        let mut output = egui::TextEdit::singleline(text)
+            .desired_width(f32::INFINITY)
+            .show(&mut child);
+        let edit = output.response;
+        // focus once when renaming starts, with the name selected, so a
+        // click anywhere else can take focus away and commit the rename
+        if std::mem::take(&mut shell.ui.rename_focus) {
+            edit.request_focus();
+            let all = egui::text::CCursorRange::two(
+                egui::text::CCursor::new(0),
+                egui::text::CCursor::new(text.chars().count()),
+            );
+            output.state.cursor.set_char_range(Some(all));
+            output.state.store(child.ctx(), edit.id);
+        }
         let escape = child.input(|i| i.key_pressed(egui::Key::Escape));
         if escape {
             shell.ui.renaming = None;
-        } else if (enter || edit.lost_focus())
+        } else if edit.lost_focus()
             && let Some((id, text)) = shell.ui.renaming.take()
         {
+            // Enter, Tab or a click elsewhere commits
             shell.editor.rename(id, &text);
         }
     } else {
@@ -225,10 +238,12 @@ fn row(ui: &mut egui::Ui, shell: &mut Shell, id: LayerId, depth: usize) {
     }
     if response.double_clicked() {
         shell.ui.renaming = Some((id, name.clone()));
+        shell.ui.rename_focus = true;
     }
     if shell.editor.rename_request == Some(id) {
         shell.editor.rename_request = None;
         shell.ui.renaming = Some((id, name.clone()));
+        shell.ui.rename_focus = true;
     }
 
     // right-click: select the row first unless it is already selected,
@@ -236,7 +251,7 @@ fn row(ui: &mut egui::Ui, shell: &mut Shell, id: LayerId, depth: usize) {
     if response.secondary_clicked() && !selected {
         shell.editor.select(id, SelectMode::Replace);
     }
-    response.context_menu(|ui| menus::layer_context(ui, shell));
+    menus::context_menu(&response, |ui| menus::layer_context(ui, shell));
 
     drag_and_drop(ui, shell, &response, rect, id, is_container);
 }

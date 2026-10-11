@@ -166,6 +166,18 @@ pub fn apply(ctx: &egui::Context, theme: Theme) -> Palette {
         s.spacing.button_padding = egui::vec2(6.0, 3.0);
         s.spacing.menu_margin = egui::Margin::same(6);
         s.interaction.tooltip_delay = 0.4;
+        // labels are interface text, not documents: no I-beam, no selection
+        s.interaction.selectable_labels = false;
+        s.interaction.multi_widget_text_select = false;
     });
     p
+}
+
+/// Style for every popup menu (menu bar and right-click menus). egui's own
+/// menu style packs items at 2 px padding; desktop menus breathe more.
+pub fn menu_style(style: &mut egui::Style) {
+    egui::containers::menu::menu_style(style);
+    style.spacing.button_padding = egui::vec2(10.0, 4.0);
+    style.spacing.item_spacing.y = 1.0;
+    style.spacing.menu_margin = egui::Margin::same(4);
 }

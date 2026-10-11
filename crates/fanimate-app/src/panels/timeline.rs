@@ -198,7 +198,7 @@ fn row(
     if name_resp.secondary_clicked() && !selected {
         shell.editor.select(id, SelectMode::Replace);
     }
-    name_resp.context_menu(|ui| menus::layer_context(ui, shell));
+    menus::context_menu(&name_resp, |ui| menus::layer_context(ui, shell));
 
     // keyframes
     let now = shell.editor.current_frame();
@@ -234,7 +234,7 @@ fn row(
             shell.editor.select(id, SelectMode::Replace);
         }
     }
-    key_resp.context_menu(|ui| {
+    menus::context_menu(&key_resp, |ui| {
         let f = shell.editor.current_frame();
         ui.label(RichText::new(format!("Frame {f}")).color(p.text_muted));
         menus::item(ui, shell, Action::AddKey);
