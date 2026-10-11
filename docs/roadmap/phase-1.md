@@ -4,6 +4,72 @@ Companion to the [product vision](../product-vision.md). The brand assets propos
 
 > **What comes from the vision and what is new.** The scope, the Gate 1 criteria and the performance budget are taken from the product vision. The brand proposals, the milestone order, the task lists and the acceptance tests are new proposals, written so the team can challenge and change them.
 
+## Status
+
+*Updated 11 October 2026.*
+
+| Milestone | Status |
+|---|---|
+| M0: Ground work | **Done** |
+| M1: Engine spike | **In progress** |
+| M2 to M6 | Not started |
+
+### M0: Ground work (done)
+
+- [x] Name and trademark check: "Fanimate" passed the trademark and domain check
+- [x] Brand v1: logo, app and file icons, design tokens, themes ([`brand/`](../../brand/))
+- [x] Licence and public repository: dual MIT / Apache 2.0
+- [x] Governance basics: [CONTRIBUTING](../../CONTRIBUTING.md), [Code of Conduct](../../CODE_OF_CONDUCT.md), [GOVERNANCE](../../GOVERNANCE.md), [SECURITY](../../SECURITY.md), issue and pull request templates
+- [x] Release pipeline: `pnpm release` runs the checks locally, then tags; the tag runs the [release workflow](../../.github/workflows/release.yml) (format, clippy, tests and builds on Windows, macOS and Linux, the WebAssembly build, the brand tokens, and a draft GitHub release). CI does not run on ordinary pushes.
+- [x] Legal review scoped ([docs/legal/review-scope.md](../legal/review-scope.md))
+
+### M1: Engine spike (in progress)
+
+- [x] Core engine: scene graph, animation channels, bones with forward kinematics, rigid binding, frame evaluation (`fanimate-core`)
+- [x] Renderer: lyon tessellation and a wgpu pipeline with 4× MSAA, shared by the canvas and export (`fanimate-render`)
+- [x] `.fnm` v0: reader, atomic writer, validator with self-repair, and the [specification](../spec/fnm-v0.md) (`fanimate-fnm`)
+- [x] Headless rendering to PNG (`fanimate-cli render`)
+- [x] Benchmark scenes and tools (`fanimate --bench`, `fanimate-cli bench`)
+- [x] Engine crates compile to WebAssembly
+- [x] UI shell (`fanimate-app` on egui and egui_dock, sharing the renderer's wgpu device):
+  - Menus in a custom title bar (no separate menu row), with window buttons, dragging and edge resizing on Windows and Linux; native traffic lights on macOS
+  - Moho Pro layout: Tools left of the canvas, Timeline along the bottom, Properties / Style / Actions above Layers on the right; every panel can be docked, tabbed, closed and reopened (Window menu), and the layout is remembered
+  - Right-click menus on layers, the canvas, timeline rows and keyframes (P23)
+  - Two keymaps, **Fanimate (standard)** by default and **Moho**, chosen on first launch and switchable from Edit › Keyboard Shortcuts, Preferences or the status bar (P24)
+  - Layers panel: click, Ctrl-click and Shift-click selection, drag and drop to reorder or nest, rename in place (double-click or F2), one-click visibility, filter; cut, copy, paste, duplicate, group and ungroup with standard shortcuts
+  - Properties panel replaces Moho's modal Layer Settings and Project Settings dialogs; edits update the canvas live and auto-key animated values
+  - Canvas: pan, zoom about the pointer, fit, 100%, click to select, Transform Layer tool, selection outlines and bone overlay
+  - Timeline: transport, scrubbable ruler with seconds markers, keyframe diamonds per layer, add and delete keys, keyframe navigation
+  - Undo and redo for every edit (snapshot history; per-object history comes in M2), command palette, four brand themes, unsaved-changes prompts
+- [ ] Drawing and bone tools (shown in the Tools panel, marked with the milestone that brings them: M2 and M3)
+- [ ] Browser build of the app itself
+- [ ] Benchmark on macOS and Linux hardware, and choose the reference laptop
+- [ ] Change tracking so only changed parts of a frame are recalculated (not needed yet: evaluation takes 0.005 ms for 40 bones)
+
+**First measurements.** Windows 10, Intel HD Graphics 520 (a 2015 low-end integrated GPU, well below the "mid-range laptop" in the budget), DirectX 12, release build:
+
+| Scene | Frame rate (1280×800 window, no vsync) | CPU per frame | Save | Load + validate |
+|---|---|---|---|---|
+| Benchmark, 40 bones, 81 shapes | **183 fps** | 0.37 ms | 11.5 ms | 32.8 ms |
+| Stress test, 400 bones, 801 shapes | 156 fps | 2.2 ms | 17.6 ms | 79.7 ms |
+
+The 60 fps budget holds with plenty of room on this machine. The benchmark rig does not use Smart Bones or weighted deformation yet (they arrive in M3), so expect these numbers to fall as those features land; every release build runs the CPU benchmark so regressions show up.
+
+**Known issue.** The Vulkan driver for Intel HD Graphics 520 crashes the process while loading, before wgpu can report an error. Fanimate therefore uses DirectX 12 (with OpenGL as fallback) by default on Windows; `WGPU_BACKEND=vulkan` still selects Vulkan.
+
+### First 30 days checklist (section 7)
+
+- [x] 1. Trademark and domain check
+- [x] 2. Brand direction chosen
+- [x] 3. Logo and icon set
+- [x] 4. Design-token file
+- [x] 5. Public repository with licence, README, contributing guide, code of conduct, issue templates
+- [x] 6. Builds on Windows, macOS, Linux and WASM, run per release (first run on the first `pnpm release`)
+- [ ] 7. Reference hardware chosen and specified
+- [x] 8. Benchmark scenes built
+- [ ] 9. Import test corpus started
+- [ ] 10. Advisers recruited
+
 ## Contents
 
 1. [Branding assets](#1-branding-assets)
@@ -223,7 +289,7 @@ Taken from the vision's roadmap, with the pain points each item addresses:
 | Lip sync | Bundled Rhubarb, editable lip-sync track | P6 |
 | Import | SVG (full), PSD, Moho (`.moho`), Animate (`.fla`, `.xfl`) | P19 |
 | Export | Video (MP4, WebM, GIF, image sequences) | P19 |
-| Interface | Moho-style dockable UI, saved workspaces, HiDPI, command palette, Moho keymaps | P15 |
+| Interface | Moho-style dockable layout with menus in the title bar, right-click menus everywhere, Properties panel instead of modal dialogs, HiDPI, command palette, Fanimate (standard) and Moho keymaps | P15, P23, P24 |
 | Licensing and governance | MIT / Apache 2.0, public repo, roadmap and issue tracker | P21, P22 |
 | Quality | Performance budget, crash-free beta, stability release train | P14, P16 |
 
@@ -346,7 +412,10 @@ Eight workstreams run in parallel. Each lists its main tasks, its dependencies a
 | Themes | Token-based theming (Night, Day, Studio Grey, High contrast) from section 1 |
 | HiDPI | Correct at 100% to 300% scaling, per-monitor |
 | Command palette | Search every command and setting |
-| Keymaps | Moho default, remappable; Animate and Harmony keymaps can follow in Phase 2 |
+| Keymaps | Two presets: Fanimate (standard editing shortcuts, the default) and Moho; chosen on first launch, switchable any time. Full remapping and Harmony-style keys can follow in Phase 2 |
+| Title-bar menus | Menus share the window title bar; custom caption buttons and resizing on Windows and Linux, native controls on macOS |
+| Right-click menus | Context menus on every panel, reusing the main menu commands and showing their shortcuts (P23) |
+| Properties panel | Layer and project settings edited live in a docked panel, never in modal dialogs (P23) |
 | Accessibility | Keyboard navigation, screen-reader labels where the platform allows, high-contrast theme, scalable fonts |
 | First-run experience | Short interactive tutorial, "Coming from Moho / Animate" guide |
 

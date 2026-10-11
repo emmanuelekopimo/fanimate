@@ -21,7 +21,7 @@ The timing is right. Adobe Animate went into maintenance mode in February 2026 w
 
 ## Why Moho Pro frustrates users
 
-Moho's rigging is loved; almost everything around it is the problem. The table lists every pain point Fanimate must solve. IDs (P1–P22) are used throughout this document.
+Moho's rigging is loved; almost everything around it is the problem. The table lists every pain point Fanimate must solve. IDs (P1–P24) are used throughout this document.
 
 | **ID** | **Pain point** | **What users actually experience** |
 |---|---|---|
@@ -47,6 +47,8 @@ Moho's rigging is loved; almost everything around it is the problem. The table l
 | P20 | Small industry footprint | Few studios list Moho in job ads, so learning it opens fewer doors and studios hesitate to adopt it. |
 | P21 | Licensing and upgrade friction | Paid major upgrades ($349.99 from Pro 12 to Pro 14); serials bought from some resellers excluded from free updates; unreliable in-app updater. |
 | P22 | Slow, closed development | Small team, long gaps between versions, roadmap decided privately. Users can't fix bugs themselves. |
+| P23 | Awkward layer handling, no right-click menus | The Layers panel works unlike other editing apps: no context menus anywhere, layers copied and pasted only through Edit > Copy Layer / Paste Layer with no shortcut, settings changed in blocking modal dialogs. |
+| P24 | Unconventional shortcuts | Ctrl+C / Ctrl+V do not copy and paste layers, Ctrl+Y is not redo (it selects a tracing image; redo is only Ctrl+Shift+Z), tools use single letters unlike any other app. Newcomers from Adobe, Toon Boom or Krita fight the keyboard. |
 
 What Moho gets right, and what Fanimate must keep, is just as clear: Smart Bones, easy inverse kinematics (IK), bone physics, PSD-based puppets, a perpetual (non-subscription) feel, and a friendly, generous community.
 
@@ -60,7 +62,7 @@ Fanimate wins by being the only tool that is rig-first *and* draw-first, free, o
 4. **Polish before features.** A release ships only when its features are finished; bug fixes have their own release train (P16).
 5. **Open everything.** Open file format, open source, open roadmap, open API (P18, P22).
 6. **Plays well with others.** Clean import from SVG, PSD, Moho, Animate and Harmony; export to video, Lottie, web and game engines (P19).
-7. **Looks and works like Moho Pro.** Fanimate keeps Moho Pro's layout (tools on the left, canvas in the centre, Layers, Style and Actions panels on the right, timeline along the bottom) with Moho's tool names, groupings, concepts (bones, Smart Bones, actions, switch layers) and default shortcuts. Fanimate draws its own icons and visual styling and is written from scratch, never from Moho's code.
+7. **Looks like Moho Pro, works like a modern editor.** Fanimate keeps Moho Pro's layout (tools on the left, canvas in the centre, Layers, Style and Actions panels on the right, timeline along the bottom) with Moho's tool names, groupings and concepts (bones, Smart Bones, actions, switch layers). It does **not** keep Moho's interaction problems (P23, P24): every panel has right-click menus, layers copy and paste with Ctrl+C / Ctrl+V, Ctrl+Y redoes, and settings are edited in a docked panel instead of modal dialogs. Moho users can switch to a Moho keymap at any time. Fanimate draws its own icons and visual styling and is written from scratch, never from Moho's code.
 
 ### How Fanimate compares
 
@@ -253,9 +255,16 @@ SVG is a major entry point for art made in Illustrator, Inkscape, Affinity Desig
 ### 10. Interface (P15)
 
 - **Moho Pro layout by default, fully dockable** with saved workspaces (Rigging, Drawing, Animation, Compositing), plus floating panels for second monitors.
+- **Menus in the title bar:** the menu bar shares the window's title bar (as in VS Code and other modern editors), so no vertical space is spent on a separate menu row. Windows and Linux get a custom title bar with its own window buttons; macOS keeps its native traffic lights.
+- **Right-click menus everywhere (P23):** on layers, the canvas, timeline rows and keyframes, with the same commands and shortcuts as the main menus. Right-clicking an unselected item selects it first, as in every other editor.
+- **Layers that behave like other apps (P23):** click, Ctrl-click and Shift-click selection; drag and drop to reorder or nest; double-click or F2 to rename in place; one-click visibility; cut, copy, paste and duplicate layers with the usual shortcuts.
+- **Properties in a panel, not dialogs:** layer and project settings are edited live in a docked Properties panel instead of Moho's blocking Layer Settings and Project Settings dialogs.
 - **Sharp on every screen:** the GPU-drawn UI scales cleanly on 4K and high-density displays; adjustable font size and contrast.
 - **Command palette:** press a key, type any command or setting, with no hunting through menus.
-- **Keymaps:** Moho Pro's shortcuts out of the box, plus Animate-style and Harmony-style keymaps, all remappable.
+- **Keymaps (P24):** two keymaps ship from day one, chosen on first launch and switchable any time:
+  - **Fanimate (default):** the conventions of mainstream editing apps. Ctrl+C / Ctrl+X / Ctrl+V on anything selected, including layers; Ctrl+Z undo; Ctrl+Y and Ctrl+Shift+Z redo; Delete, F2 rename, Ctrl+D duplicate; tool letters from Adobe Animate and Illustrator.
+  - **Moho:** Moho Pro's own shortcuts, so Moho users keep their muscle memory.
+  Harmony-style keymaps and full remapping follow later; every menu shows the active keymap's shortcuts.
 - **Pen and touch first:** radial menus, gestures and on-canvas controls for tablet users.
 - **Built-in learning:** interactive tutorials inside the app and contextual hints the first time a tool is used.
 
@@ -434,7 +443,7 @@ Every pain point has at least one owning feature and a phase.
 | P12 | Slow with complex scenes | GPU renderer, change-only evaluation, performance budget | 1 |
 | P13 | Hidden corrupting bugs | File validator and self-repair on every save | 1 |
 | P14 | Crashes and unstable releases | Journal autosave, phase quality gates, stability release train | 1 |
-| P15 | Dated UI | Docking workspaces, HiDPI, command palette, keymaps | 1 |
+| P15 | Dated UI | Docking workspaces, menus in the title bar, HiDPI, command palette, keymaps | 1 |
 | P16 | Polish neglected | Separate stability releases; public bug voting | All |
 | P17 | No collaboration | Fanimate Hub, asset library, review and approvals | 3 |
 | P18 | Limited scripting | Python, TypeScript and WASM API; headless mode | 2 |
@@ -442,6 +451,8 @@ Every pain point has at least one owning feature and a phase.
 | P20 | Small industry footprint | Free education programme, certification, studio pilots | 3–4 |
 | P21 | Licensing friction | Free MIT/Apache licence; no paid upgrades | 1 |
 | P22 | Slow, closed development | Open source, public roadmap, steering group | 1 |
+| P23 | Awkward layer handling, no right-click menus | Context menus everywhere, standard layer selection, drag and drop, rename in place, Properties panel instead of modal dialogs | 1 |
+| P24 | Unconventional shortcuts | Fanimate (standard) keymap by default, Moho keymap one click away | 1 |
 
 ### References
 

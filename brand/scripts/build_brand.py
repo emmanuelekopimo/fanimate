@@ -4,7 +4,8 @@ Generates the logo SVGs from shared geometry, rasterises app and file icons
 (PNG, ICO, ICNS), renders the social card, writes themes.css from
 tokens.json and checks colour contrast.
 
-Usage:  python brand/scripts/build_brand.py
+Usage:  python brand/scripts/build_brand.py           rebuild everything
+        python brand/scripts/build_brand.py --check   verify contrast and themes.css only
 Needs:  Pillow, PyMuPDF  (pip install pillow pymupdf)
 """
 
@@ -412,7 +413,18 @@ def main():
         sys.exit(1)
     print("Contrast checks passed.")
 
-    write(BRAND / "tokens" / "themes.css", themes_css())
+    css_path = BRAND / "tokens" / "themes.css"
+    if "--check" in sys.argv:
+        # CI mode: verify only. Rendered images differ slightly between
+        # platforms, so they are not compared; the CSS is plain text.
+        current = css_path.read_text(encoding="utf-8") if css_path.exists() else ""
+        if current != themes_css():
+            print("themes.css is out of date with tokens.json; run build_brand.py")
+            sys.exit(1)
+        print("themes.css is up to date.")
+        return
+
+    write(css_path, themes_css())
 
     logo = BRAND / "logo"
     icon_svg, small_svg = app_icon_svg(), app_icon_svg(small=True)

@@ -1,0 +1,169 @@
+//! The Fanimate desktop app.
+//!
+//! ```text
+//! fanimate                       open the app with the hello sample
+//! fanimate scene.fnm             open a project
+//! fanimate --bench [--bones N]   play the benchmark rig for 10 s, print fps
+//!   --no-vsync                   present as fast as possible
+//! ```
+
+mod app;
+mod canvas_gpu;
+mod dialogs;
+mod icons;
+mod menus;
+mod panels;
+mod theme;
+mod titlebar;
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use eframe::egui;
+use eframe::egui_wgpu::{WgpuConfiguration, WgpuSetup, WgpuSetupCreateNew};
+
+struct Args {
+    file: Option<PathBuf>,
+    bench_bones: Option<usize>,
+    vsync: bool,
+}
+
+fn parse_args() -> Result<Args, String> {
+    let mut args = std::env::args().skip(1);
+    let mut out = Args {
+        file: None,
+        bench_bones: None,
+        vsync: true,
+    };
+    let mut bench = false;
+    let mut bones = 40;
+    while let Some(a) = args.next() {
+        match a.as_str() {
+            "--bench" => bench = true,
+            "--no-vsync" => out.vsync = false,
+            "--bones" => {
+                bones = args
+                    .next()
+                    .and_then(|n| n.parse().ok())
+                    .ok_or("--bones needs a number")?;
+            }
+            "-V" | "--version" => {
+                println!("fanimate {}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
+            "-h" | "--help" => {
+                println!("usage: fanimate [scene.fnm] [--bench [--bones N]] [--no-vsync]");
+                std::process::exit(0);
+            }
+            other if other.starts_with('-') => return Err(format!("unknown option {other}")),
+            other => out.file = Some(PathBuf::from(other)),
+        }
+    }
+    if bench {
+        out.bench_bones = Some(bones);
+    }
+    Ok(out)
+}
+
+fn main() -> eframe::Result {
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
+    let args = match parse_args() {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("fanimate: {e}");
+            std::process::exit(2);
+        }
+    };
+
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_title("Fanimate")
+        .with_app_id("fanimate")
+        // fits a 1366x768 laptop; starts maximised, later runs restore the
+        // last window size and position
+        .with_inner_size([1280.0, 720.0])
+        .with_min_inner_size([900.0, 560.0])
+        .with_maximized(true);
+    if let Ok(icon) =
+        eframe::icon_data::from_png_bytes(include_bytes!("../../../brand/app-icon/fanimate-256.png"))
+    {
+        viewport = viewport.with_icon(Arc::new(icon));
+    }
+    viewport = if titlebar::uses_custom_frame() {
+        // the menus live in our own title bar
+        viewport.with_decorations(false)
+    } else {
+        // macOS: keep the traffic lights, draw under the title bar
+        viewport
+            .with_fullsize_content_view(true)
+            .with_title_shown(false)
+            .with_titlebar_shown(false)
+    };
+
+    // same backend choice as the renderer (DX12 first on Windows)
+    let mut setup = WgpuSetupCreateNew::without_display_handle();
+    setup.instance_descriptor.backends = fanimate_render::backends();
+    let mut wgpu_options = WgpuConfiguration {
+        wgpu_setup: WgpuSetup::CreateNew(setup),
+        ..Default::default()
+    };
+    if !args.vsync {
+        wgpu_options.surface.present_mode = wgpu::PresentMode::AutoNoVsync;
+    }
+
+    let options = eframe::NativeOptions {
+        viewport,
+        wgpu_options,
+        persist_window: args.bench_bones.is_none(),
+        ..Default::default()
+    };
+    let opts = app::Options {
+        file: args.file,
+        bench_bones: args.bench_bones,
+    };
+    eframe::run_native(
+        "Fanimate",
+        options,
+        Box::new(|cc| Ok(Box::new(app::FanimateApp::new(cc, opts)))),
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    /// UI rule from CLAUDE.md: never use em dashes in UI text. Every UI and
+    /// CLI string lives in Rust source, so scan all crates.
+    #[test]
+    fn no_em_dashes_in_source() {
+        let crates = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("crates dir");
+        let mut offenders = Vec::new();
+        scan(crates, &mut offenders);
+        assert!(
+            offenders.is_empty(),
+            "em dash (U+2014) found; use a colon, comma or hyphen:\n{}",
+            offenders.join("\n")
+        );
+    }
+
+    fn scan(dir: &Path, out: &mut Vec<String>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                scan(&path, out);
+            } else if path.extension().is_some_and(|e| e == "rs")
+                && let Ok(text) = std::fs::read_to_string(&path)
+            {
+                for (n, line) in text.lines().enumerate() {
+                    if line.contains('\u{2014}') {
+                        out.push(format!("{}:{}: {}", path.display(), n + 1, line.trim()));
+                    }
+                }
+            }
+        }
+    }
+}

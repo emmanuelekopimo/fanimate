@@ -4,7 +4,7 @@
 
 Brand assets and guidelines for Fanimate. The reasoning behind these choices is in [section 1 of the Phase 1 breakdown](../docs/roadmap/phase-1.md#1-branding-assets).
 
-> **Status: v1.** The name has not yet had its trademark and domain check (a Month 1 task in the Phase 1 plan). Treat the name and logo as provisional until that check is done.
+> **Status: v1.** The name "Fanimate" has passed its trademark and domain check. Registering the name and logo as trademarks is part of the [legal review](../docs/legal/review-scope.md#5-brand).
 
 ## Contents
 
@@ -133,9 +133,9 @@ The script checks contrast first and stops if a theme fails, then writes the SVG
 
 From the [brand asset checklist](../docs/roadmap/phase-1.md#17-brand-asset-checklist):
 
-- [ ] Trademark and domain check for the name
+- [x] Trademark and domain check for the name
 - [ ] Splash screen and about dialog (onion-skin F illustration, as on the social card)
-- [ ] Interface icon set v1 (about 120 icons)
+- [ ] Interface icon set v1 (about 120 icons). The first 20 (tools, layer types, layer actions, visibility) are drawn in code in `crates/fanimate-app/src/icons.rs`
 - [ ] Installer art (Windows banner, macOS DMG background, Flatpak metadata)
 - [ ] Add JetBrains Mono to `fonts/`
 - [ ] Optional: a mascot rigged in Fanimate

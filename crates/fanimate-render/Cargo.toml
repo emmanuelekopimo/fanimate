@@ -1,0 +1,21 @@
+[package]
+name = "fanimate-render"
+description = "Fanimate GPU renderer: tessellates vector shapes with lyon and draws them with wgpu."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+fanimate-core.workspace = true
+bytemuck.workspace = true
+lyon.workspace = true
+log.workspace = true
+pollster.workspace = true
+thiserror.workspace = true
+wgpu.workspace = true
+
+[lints]
+workspace = true

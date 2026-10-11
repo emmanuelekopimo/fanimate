@@ -1,0 +1,19 @@
+[package]
+name = "fanimate-core"
+description = "Fanimate core engine: scene graph, animation curves, bones and evaluation. No UI or GPU code."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+glam.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+serde_json.workspace = true
+
+[lints]
+workspace = true

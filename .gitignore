@@ -21,3 +21,10 @@ desktop.ini
 
 # Office lock files
 ~$*
+
+# Local reference material (screenshots of other apps, test files we may
+# not redistribute). Never commit it; see CONTRIBUTING.md, clean-room rule.
+/reference/
+
+# Release packaging output
+/dist/

@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest something Fanimate should do
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way? Describe the animation task, not just the feature.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like
+      description: How it could work. If another tool (Moho, Harmony, Animate, Krita…) does it well, say how.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Rigging and bones
+        - Drawing and frame-by-frame
+        - Timeline and animation
+        - Import and export
+        - Interface
+        - Performance
+        - File format
+        - Other

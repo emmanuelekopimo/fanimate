@@ -1,0 +1,10 @@
+{
+  "name": "fanimate",
+  "private": true,
+  "type": "module",
+  "description": "Repository scripts for Fanimate. The app itself is Rust; see Cargo.toml.",
+  "scripts": {
+    "release": "node scripts/release.js"
+  },
+  "packageManager": "pnpm@10.33.0"
+}

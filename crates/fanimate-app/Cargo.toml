@@ -1,0 +1,33 @@
+[package]
+name = "fanimate-app"
+description = "The Fanimate desktop app: window, docking UI shell, canvas and timeline."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "fanimate"
+path = "src/main.rs"
+
+[dependencies]
+fanimate-core.workspace = true
+fanimate-fnm.workspace = true
+fanimate-render.workspace = true
+fanimate-editor.workspace = true
+env_logger.workspace = true
+log.workspace = true
+pollster.workspace = true
+wgpu.workspace = true
+winit.workspace = true
+image.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+eframe = { version = "0.36", default-features = false, features = ["wgpu", "default_fonts", "accesskit", "wayland", "x11", "persistence"] }
+egui_dock = { version = "0.21", features = ["serde"] }
+rfd = "0.17"
+
+[lints]
+workspace = true

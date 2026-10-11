@@ -1,0 +1,39 @@
+name: Bug report
+description: Something does not work as it should
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Run `fanimate-cli render scene.fnm -o out.png`
+        2. ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, CPU, GPU, and the Fanimate commit or version.
+      placeholder: Windows 11, Ryzen 5 5600U, Radeon integrated, commit abc1234
+    validations:
+      required: true
+  - type: textarea
+    id: files
+    attributes:
+      label: Files and logs
+      description: Attach a project file if you can share it, and any output. Run with `RUST_LOG=info` for more detail.
+  - type: checkboxes
+    id: data
+    attributes:
+      label: Data loss
+      options:
+        - label: This bug lost or damaged work (we treat these as top priority)
