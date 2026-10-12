@@ -189,6 +189,7 @@ fn io_err(path: &Path, source: std::io::Error) -> FnmError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fanimate_core::eval::evaluate;
     use fanimate_core::samples;
 
     fn temp_dir(name: &str) -> PathBuf {
@@ -207,6 +208,53 @@ mod tests {
         let (loaded, report) = load(&path).unwrap();
         assert_eq!(loaded, doc);
         assert!(report.is_clean(), "{report}");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Every file in a project folder, by path relative to it.
+    fn project_files(root: &Path) -> Vec<(PathBuf, Vec<u8>)> {
+        fn walk(root: &Path, dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>)>) {
+            for entry in fs::read_dir(dir).unwrap().flatten() {
+                let path = entry.path();
+                if path.is_dir() {
+                    walk(root, &path, out);
+                } else {
+                    let rel = path.strip_prefix(root).unwrap().to_path_buf();
+                    out.push((rel, fs::read(&path).unwrap()));
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(root, root, &mut out);
+        out.sort();
+        out
+    }
+
+    /// The engine's headless promise (WS1): a scene built and animated in
+    /// code, saved and reopened with no UI, evaluates identically on every
+    /// frame, and saving it again writes the same bytes.
+    #[test]
+    fn reopened_project_is_deterministic() {
+        let dir = temp_dir("deterministic");
+        let doc = samples::benchmark(40);
+        let (first, second) = (dir.join("a.fnm"), dir.join("b.fnm"));
+        save(&doc, &first).unwrap();
+        let (loaded, _) = load(&first).unwrap();
+        save(&loaded, &second).unwrap();
+        assert_eq!(project_files(&first), project_files(&second));
+
+        let mut half_frames = doc.start * 2..=doc.end * 2;
+        assert!(half_frames.all(|f| {
+            let frame = f as f32 / 2.0;
+            let (a, b) = (evaluate(&doc, frame), evaluate(&loaded, frame));
+            a.len() == b.len()
+                && a.iter().zip(&b).all(|(a, b)| {
+                    a.layer == b.layer
+                        && a.shape == b.shape
+                        && a.transform == b.transform
+                        && a.opacity == b.opacity
+                })
+        }));
         fs::remove_dir_all(dir).unwrap();
     }
 

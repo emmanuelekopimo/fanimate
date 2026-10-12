@@ -6,12 +6,12 @@ By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Where things stand
 
-Fanimate is in **Phase 1, milestone M1 (engine spike)**. The goal of M1 is to prove the architecture: the core engine, the GPU renderer and the `.fnm` file format, on Windows, macOS and Linux. There is no editing interface yet. See the [Phase 1 plan](docs/roadmap/phase-1.md) for what comes next.
+Fanimate is in **Phase 1**. Milestone M1 (engine spike) proved the architecture: the core engine, the GPU renderer, the `.fnm` file format and the app shell with its Moho-style layout. It is done on Windows and waits for benchmark numbers from macOS and Linux. Next is M2 (Draw): drawing tools, keyframe animation and the autosave journal. See the [Phase 1 plan](docs/roadmap/phase-1.md) for details.
 
 Good ways to help right now:
 
-- Run the benchmark on your machine and post the numbers in an issue (see [Benchmarks](#benchmarks)).
-- Contribute Moho, Animate, SVG or PSD files to the import test corpus (open an issue first; we need permission to use each file).
+- Run the benchmark on your machine, especially on macOS or Linux, and post the numbers in an issue (see [Benchmarks](#benchmarks)).
+- Contribute Moho, Animate, SVG or PSD files to the [import test corpus](corpus/README.md) (open an issue first; we need permission to use each file).
 - Pick up an issue labelled `good first issue`.
 - Review the [product vision](docs/product-vision.md) and the [`.fnm` specification](docs/spec/fnm-v0.md) and open issues where they are unclear or wrong.
 
@@ -51,7 +51,7 @@ Keep `fanimate-core` free of UI, GPU and platform code. It has to run headless o
 
 ```sh
 cargo run --release -p fanimate-app -- --bench            # 10 s GPU benchmark, prints fps
-cargo run --release -p fanimate-cli -- bench              # CPU benchmark
+cargo run --release -p fanimate-cli -- bench --gpu        # CPU benchmark plus offscreen GPU render
 cargo run --release -p fanimate-cli -- sample hello hello.fnm
 cargo run --release -p fanimate-cli -- render hello.fnm -o hello.png --frame 12
 cargo run --release -p fanimate-cli -- validate hello.fnm
@@ -118,14 +118,14 @@ AI tools are welcome, but you are responsible for every line you submit: you mus
 
 ## Benchmarks
 
-The Gate 1 performance budget is 60 fps for a 40-bone rig on a mid-range laptop. To help measure it:
+The Gate 1 performance budget is 60 fps for a 40-bone rig on a mid-range laptop, defined in [docs/reference-hardware.md](docs/reference-hardware.md). To help measure it:
 
 ```sh
 cargo run --release -p fanimate-app -- --bench --no-vsync
-cargo run --release -p fanimate-cli -- bench
+cargo run --release -p fanimate-cli -- bench --gpu
 ```
 
-Post both outputs with your CPU, GPU, operating system and screen resolution.
+Post both outputs with your CPU, GPU, operating system, screen resolution and scaling.
 
 ## Licence of contributions
 

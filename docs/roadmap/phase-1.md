@@ -6,13 +6,14 @@ Companion to the [product vision](../product-vision.md). The brand assets propos
 
 ## Status
 
-*Updated 11 October 2026.*
+*Updated 12 October 2026.*
 
 | Milestone | Status |
 |---|---|
 | M0: Ground work | **Done** |
-| M1: Engine spike | **In progress** |
-| M2 to M6 | Not started |
+| M1: Engine spike | **Done on Windows**; macOS and Linux measurements outstanding |
+| M2: Draw | Next |
+| M3 to M6 | Not started |
 
 ### M0: Ground work (done)
 
@@ -23,7 +24,7 @@ Companion to the [product vision](../product-vision.md). The brand assets propos
 - [x] Release pipeline: `pnpm release` runs the checks locally, then tags; the tag runs the [release workflow](../../.github/workflows/release.yml) (format, clippy, tests and builds on Windows, macOS and Linux, the WebAssembly build, the brand tokens, and a draft GitHub release). CI does not run on ordinary pushes.
 - [x] Legal review scoped ([docs/legal/review-scope.md](../legal/review-scope.md))
 
-### M1: Engine spike (in progress)
+### M1: Engine spike (done on Windows)
 
 - [x] Core engine: scene graph, animation channels, bones with forward kinematics, rigid binding, frame evaluation (`fanimate-core`)
 - [x] Renderer: lyon tessellation and a wgpu pipeline with 4× MSAA, shared by the canvas and export (`fanimate-render`)
@@ -42,21 +43,29 @@ Companion to the [product vision](../product-vision.md). The brand assets propos
   - Timeline: transport, scrubbable ruler with seconds markers, keyframe diamonds per layer, add and delete keys, keyframe navigation
   - Undo and redo for every edit (snapshot history; per-object history comes in M2), command palette, four brand themes, unsaved-changes prompts
   - Native feel: no console window on Windows, a menu bar that switches menus on hover, native cursors, labels that are not selectable, rename fields that commit when you click away, crisp Lucide icons, and a maximised window that leaves an auto-hiding taskbar, Alt+Tab previews and screen capture working
-- [ ] Drawing and bone tools (shown in the Tools panel, marked with the milestone that brings them: M2 and M3)
-- [ ] Browser build of the app itself
-- [ ] Benchmark on macOS and Linux hardware, and choose the reference laptop
-- [ ] Change tracking so only changed parts of a frame are recalculated (not needed yet: evaluation takes 0.005 ms for 40 bones)
+- [x] Drawing and bone tools shown in the Tools panel and marked with the milestone that brings them (M2 and M3)
+- [x] GPU benchmark without a window (`fanimate-cli bench --gpu`): evaluates, tessellates and renders offscreen with 4× MSAA, waiting for the GPU every frame. Every release build runs it, with a headless render, on Windows, macOS and Linux and records the output in the run summary
+- [x] Headless determinism (the WS1 "done when"): a scene built and animated in code, saved and reopened with no UI, evaluates identically on every frame and saves to the same bytes; the same frame renders to the same pixels
+- [x] Reference hardware proposed ([reference-hardware.md](../reference-hardware.md)), waiting for the maintainers to confirm
+- [x] Import test corpus started: folder layout, consent record and a draft definition of "opens" ([corpus/](../../corpus/README.md))
+- [ ] Benchmark on macOS and Linux reference hardware (needs the machines; the exact commands are in [reference-hardware.md](../reference-hardware.md#how-to-measure))
 
-**First measurements.** Windows 10, Intel HD Graphics 520 (a 2015 low-end integrated GPU, well below the "mid-range laptop" in the budget), DirectX 12, release build:
+**Carried forward.** These were listed under M1 but belong to later milestones:
 
-| Scene | Frame rate (1280×800 window, no vsync) | CPU per frame | Save | Load + validate |
-|---|---|---|---|---|
-| Benchmark, 40 bones, 81 shapes | **183 fps** | 0.37 ms | 11.5 ms | 32.8 ms |
-| Stress test, 400 bones, 801 shapes | 156 fps | 2.2 ms | 17.6 ms | 79.7 ms |
+- Working drawing tools: M2. Working bone tools: M3.
+- Browser build of the app itself: M5, with the web build. The engine crates already compile to WebAssembly on every release.
+- Change tracking, so only changed parts of a frame are recalculated: M3, when Smart Bones and mesh deformation make evaluation expensive. Today evaluation is 0.01 ms for 40 bones and 0.1 ms for 400, and tessellation is the larger cost.
 
-The 60 fps budget holds with plenty of room on this machine. The benchmark rig does not use Smart Bones or weighted deformation yet (they arrive in M3), so expect these numbers to fall as those features land; every release build runs the CPU benchmark so regressions show up.
+**First measurements.** Windows 10, Intel Core i5-6200U with HD Graphics 520 (a 2015 low-end integrated GPU, well below the "mid-range laptop" in the budget and proposed as the [floor machine](../reference-hardware.md#the-floor)), DirectX 12, release build:
 
-**Known issue.** The Vulkan driver for Intel HD Graphics 520 crashes the process while loading, before wgpu can report an error. Fanimate therefore uses DirectX 12 (with OpenGL as fallback) by default on Windows; `WGPU_BACKEND=vulkan` still selects Vulkan.
+| Scene | App (1280×800 window, no vsync) | CLI GPU render (1280×800, offscreen) | CPU per frame | Save | Load + validate |
+|---|---|---|---|---|---|
+| Benchmark, 40 bones, 81 shapes | **165 to 183 fps** | **123 fps** | 0.37 to 0.65 ms | 11.5 to 15.5 ms | 30.5 to 32.8 ms |
+| Stress test, 400 bones, 801 shapes | 156 fps | 84 fps | 2.2 to 3.5 ms | 17.6 to 33.0 ms | 79.7 to 100 ms |
+
+Ranges are from separate runs on different days. The CLI figure is lower than the app's because it waits for the GPU after every frame instead of overlapping CPU and GPU work. The 60 fps budget holds with plenty of room on this machine. The benchmark rig does not use Smart Bones or weighted deformation yet (they arrive in M3), so expect these numbers to fall as those features land; every release build runs the benchmark so regressions show up.
+
+**Known driver issues.** The Vulkan driver for Intel HD Graphics 520 crashes the process while loading, before wgpu can report an error, and its OpenGL driver crashes in about 1 of 40 runs as the process exits, even when it was only loaded to list adapters. Fanimate therefore uses DirectX 12 on Windows and enables OpenGL only when DirectX 12 has no hardware adapter; `WGPU_BACKEND` (for example `vulkan` or `gl`) still overrides this.
 
 ### First 30 days checklist (section 7)
 
@@ -66,9 +75,9 @@ The 60 fps budget holds with plenty of room on this machine. The benchmark rig d
 - [x] 4. Design-token file
 - [x] 5. Public repository with licence, README, contributing guide, code of conduct, issue templates
 - [x] 6. Builds on Windows, macOS, Linux and WASM, run per release (first run on the first `pnpm release`)
-- [ ] 7. Reference hardware chosen and specified
+- [ ] 7. Reference hardware chosen and specified (proposed in [reference-hardware.md](../reference-hardware.md); needs confirming)
 - [x] 8. Benchmark scenes built
-- [ ] 9. Import test corpus started
+- [x] 9. Import test corpus started ([corpus/](../../corpus/README.md); no files yet)
 - [ ] 10. Advisers recruited
 
 ## Contents

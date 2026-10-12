@@ -72,15 +72,39 @@ jobs:
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
-      - name: Install Linux windowing libraries
+      - name: Install Linux windowing libraries and a software Vulkan driver
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev mesa-vulkan-drivers
       - name: Test
         run: cargo test --workspace --release
       - name: Build
         run: cargo build --release -p fanimate-app -p fanimate-cli
-      - name: CPU benchmark
-        run: cargo run -q --release -p fanimate-cli -- bench
+      - name: Headless render and benchmark
+        # Shows that the renderer works on every platform and records the
+        # numbers in the run summary. Hosted runners have no real GPU (a
+        # software renderer or a virtual GPU), so the GPU figures are a smoke
+        # test, not the performance budget; that is measured on the reference
+        # laptops. A failure here is reported but does not stop the release.
+        continue-on-error: true
+        shell: bash
+        run: |
+          cli="target/release/fanimate-cli${{ matrix.exe }}"
+          "$cli" sample benchmark bench.fnm
+          "$cli" render bench.fnm -o "render-${{ matrix.name }}.png" --frame 30 --width 640
+          {
+            echo "### ${{ matrix.name }}"
+            echo '```'
+            "$cli" bench --gpu
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+      - name: Keep the render for cross-platform comparison
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: render-${{ matrix.name }}
+          path: render-${{ matrix.name }}.png
+          if-no-files-found: ignore
+          retention-days: 30
       - name: Package
         id: package
         shell: bash
@@ -114,6 +138,8 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
+          # the packages only, not the comparison renders
+          pattern: fanimate-*
           path: dist
           merge-multiple: true
       - name: Create draft release

@@ -13,7 +13,7 @@ mod offscreen;
 pub mod tess;
 
 pub use gpu::{RenderTarget, Renderer, View};
-pub use offscreen::{Gpu, backends, instance, render_to_rgba};
+pub use offscreen::{Gpu, Offscreen, backends, instance, render_to_rgba};
 pub use tess::{Mesh, Tessellator, Vertex};
 
 #[derive(Debug, thiserror::Error)]

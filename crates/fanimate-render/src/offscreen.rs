@@ -49,30 +49,61 @@ impl Gpu {
     pub fn headless() -> Result<Self, RenderError> {
         pollster::block_on(Self::new(instance(), None))
     }
+
+    /// Whether this is a software rasteriser (lavapipe, llvmpipe, WARP)
+    /// rather than a real GPU. Its timings say nothing about GPU speed.
+    pub fn is_software(&self) -> bool {
+        self.adapter.get_info().device_type == wgpu::DeviceType::Cpu
+    }
 }
 
-/// Create the wgpu instance with Fanimate's backend choice.
-///
-/// On Windows this is DirectX 12, with OpenGL as a fallback for old GPUs.
-/// Vulkan is left out there because some older Intel drivers (seen on HD
-/// Graphics 520) crash the whole process while the Vulkan driver loads, which
-/// cannot be caught. Elsewhere wgpu's primary backends are used (Vulkan,
-/// Metal, WebGPU). The `WGPU_BACKEND` environment variable overrides this,
-/// e.g. `WGPU_BACKEND=vulkan`.
+/// Create the wgpu instance with Fanimate's backend choice (see
+/// [`backends`]).
 pub fn instance() -> wgpu::Instance {
     let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
     desc.backends = backends();
     wgpu::Instance::new(desc.with_env())
 }
 
-/// The graphics backends Fanimate uses (see [`instance`]), honouring
-/// `WGPU_BACKEND`. Also used to configure the app window's renderer.
+/// The graphics backends Fanimate uses, honouring `WGPU_BACKEND` (e.g.
+/// `WGPU_BACKEND=vulkan`). Also used to configure the app window's renderer.
+///
+/// On Windows this is DirectX 12, plus OpenGL only when DirectX 12 has no
+/// hardware adapter (old GPUs). Vulkan is left out because some older Intel
+/// drivers (seen on HD Graphics 520) crash the whole process while the
+/// Vulkan driver loads, which cannot be caught. OpenGL is not enabled next to
+/// DirectX 12 because listing its adapters loads the OpenGL driver, and
+/// Intel's crashes in about 1 of 40 runs as the process exits. Elsewhere
+/// wgpu's primary backends are used (Vulkan, Metal, WebGPU).
 pub fn backends() -> wgpu::Backends {
-    wgpu::Backends::from_env().unwrap_or(if cfg!(windows) {
-        wgpu::Backends::DX12 | wgpu::Backends::GL
-    } else {
-        wgpu::Backends::PRIMARY
-    })
+    if let Some(from_env) = wgpu::Backends::from_env() {
+        return from_env;
+    }
+    #[cfg(windows)]
+    {
+        static CHOICE: std::sync::OnceLock<wgpu::Backends> = std::sync::OnceLock::new();
+        *CHOICE.get_or_init(|| {
+            if has_hardware_adapter(wgpu::Backends::DX12) {
+                wgpu::Backends::DX12
+            } else {
+                wgpu::Backends::DX12 | wgpu::Backends::GL
+            }
+        })
+    }
+    #[cfg(not(windows))]
+    wgpu::Backends::PRIMARY
+}
+
+/// Whether `backends` offers a real GPU. DirectX 12 nearly always lists the
+/// WARP software renderer, which must not win over an OpenGL GPU.
+#[cfg(windows)]
+fn has_hardware_adapter(backends: wgpu::Backends) -> bool {
+    let mut desc = wgpu::InstanceDescriptor::new_without_display_handle();
+    desc.backends = backends;
+    let adapters = pollster::block_on(wgpu::Instance::new(desc).enumerate_adapters(backends));
+    adapters
+        .iter()
+        .any(|a| a.get_info().device_type != wgpu::DeviceType::Cpu)
 }
 
 /// Render `doc` at `frame` to straight-alpha sRGB RGBA8 pixels, with the
@@ -84,99 +115,156 @@ pub fn render_to_rgba(
     width: u32,
     height: u32,
 ) -> Result<Vec<u8>, RenderError> {
-    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
-    let mut renderer = Renderer::new(&gpu.device, format, 4);
-    let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
-        label: Some("fanimate offscreen"),
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
-        view_formats: &[],
-    });
-    let view = View::fit(doc.size(), (width, height), 0.0);
+    let mut target = Offscreen::new(gpu, width, height);
+    target.draw(gpu, doc, frame);
+    target.read_rgba(gpu)
+}
 
-    let mut items = Vec::new();
-    Evaluator::default().evaluate_into(doc, frame, &mut items);
-    let mut mesh = Mesh::new();
-    let mut tess = Tessellator::new();
-    tess.tolerance = 0.25 / view.zoom;
-    tess.canvas(doc, &mut mesh);
-    tess.draw_items(&items, &mut mesh);
+/// An offscreen image that documents are rendered into, frame after frame.
+///
+/// The pipeline, the target texture and the tessellation buffers live as
+/// long as this does, so rendering a sequence (the GPU benchmark, and video
+/// export later) does not rebuild them for every frame.
+pub struct Offscreen {
+    renderer: Renderer,
+    target: wgpu::Texture,
+    target_view: wgpu::TextureView,
+    size: (u32, u32),
+    evaluator: Evaluator,
+    tess: Tessellator,
+    mesh: Mesh,
+}
 
-    let target_view = target.create_view(&Default::default());
-    renderer.render(
-        &gpu.device,
-        &gpu.queue,
-        RenderTarget {
-            view: &target_view,
-            size: (width, height),
-        },
-        &view,
-        &mesh,
-        Color::TRANSPARENT,
-    );
+impl Offscreen {
+    const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
-    // Copy out. Rows in the buffer must be 256-byte aligned.
-    let row = width * 4;
-    let padded = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("fanimate readback"),
-        size: padded as u64 * height as u64,
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    let mut encoder = gpu.device.create_command_encoder(&Default::default());
-    encoder.copy_texture_to_buffer(
-        wgpu::TexelCopyTextureInfo {
-            texture: &target,
-            mip_level: 0,
-            origin: wgpu::Origin3d::ZERO,
-            aspect: wgpu::TextureAspect::All,
-        },
-        wgpu::TexelCopyBufferInfo {
-            buffer: &buffer,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(padded),
-                rows_per_image: Some(height),
+    /// A `width` by `height` pixel target (at least 1x1), rendered with 4x
+    /// MSAA like the interactive canvas.
+    pub fn new(gpu: &Gpu, width: u32, height: u32) -> Self {
+        let size = (width.max(1), height.max(1));
+        let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("fanimate offscreen"),
+            size: wgpu::Extent3d {
+                width: size.0,
+                height: size.1,
+                depth_or_array_layers: 1,
             },
-        },
-        wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-    );
-    gpu.queue.submit([encoder.finish()]);
-
-    let (tx, rx) = std::sync::mpsc::channel();
-    buffer.map_async(wgpu::MapMode::Read, .., move |r| {
-        let _ = tx.send(r);
-    });
-    gpu.device
-        .poll(wgpu::PollType::wait_indefinitely())
-        .map_err(|_| RenderError::Readback)?;
-    rx.recv()
-        .map_err(|_| RenderError::Readback)?
-        .map_err(|_| RenderError::Readback)?;
-
-    let data = buffer.get_mapped_range(..).map_err(|_| RenderError::Readback)?;
-    let mut pixels = Vec::with_capacity((row * height) as usize);
-    for y in 0..height as usize {
-        let start = y * padded as usize;
-        pixels.extend_from_slice(&data[start..start + row as usize]);
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: Self::FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        Self {
+            renderer: Renderer::new(&gpu.device, Self::FORMAT, 4),
+            target_view: target.create_view(&Default::default()),
+            target,
+            size,
+            evaluator: Evaluator::default(),
+            tess: Tessellator::new(),
+            mesh: Mesh::new(),
+        }
     }
-    drop(data);
-    buffer.unmap();
-    unpremultiply(&mut pixels);
-    Ok(pixels)
+
+    pub fn size(&self) -> (u32, u32) {
+        self.size
+    }
+
+    /// Triangles in the last frame drawn.
+    pub fn triangles(&self) -> usize {
+        self.mesh.indices.len() / 3
+    }
+
+    /// Evaluate, tessellate and draw `doc` at `frame`, with the canvas
+    /// filling the image. Returns once the GPU work is submitted; use
+    /// [`Offscreen::wait`] or [`Offscreen::read_rgba`] to wait for it.
+    pub fn draw(&mut self, gpu: &Gpu, doc: &Document, frame: f32) {
+        let view = View::fit(doc.size(), self.size, 0.0);
+        let mut items = Vec::new();
+        self.evaluator.evaluate_into(doc, frame, &mut items);
+        self.mesh.vertices.clear();
+        self.mesh.indices.clear();
+        self.tess.tolerance = 0.25 / view.zoom;
+        self.tess.canvas(doc, &mut self.mesh);
+        self.tess.draw_items(&items, &mut self.mesh);
+        self.renderer.render(
+            &gpu.device,
+            &gpu.queue,
+            RenderTarget {
+                view: &self.target_view,
+                size: self.size,
+            },
+            &view,
+            &self.mesh,
+            Color::TRANSPARENT,
+        );
+    }
+
+    /// Block until the GPU has finished everything submitted so far.
+    pub fn wait(&self, gpu: &Gpu) -> Result<(), RenderError> {
+        gpu.device
+            .poll(wgpu::PollType::wait_indefinitely())
+            .map(|_| ())
+            .map_err(|_| RenderError::Readback)
+    }
+
+    /// The last frame drawn, as straight-alpha sRGB RGBA8 pixels.
+    pub fn read_rgba(&self, gpu: &Gpu) -> Result<Vec<u8>, RenderError> {
+        let (width, height) = self.size;
+        // rows in the buffer must be 256-byte aligned
+        let row = width * 4;
+        let padded = row.div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT) * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+        let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("fanimate readback"),
+            size: padded as u64 * height as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        gpu.queue.submit([encoder.finish()]);
+
+        let (tx, rx) = std::sync::mpsc::channel();
+        buffer.map_async(wgpu::MapMode::Read, .., move |r| {
+            let _ = tx.send(r);
+        });
+        self.wait(gpu)?;
+        rx.recv()
+            .map_err(|_| RenderError::Readback)?
+            .map_err(|_| RenderError::Readback)?;
+
+        let data = buffer.get_mapped_range(..).map_err(|_| RenderError::Readback)?;
+        let mut pixels = Vec::with_capacity((row * height) as usize);
+        for y in 0..height as usize {
+            let start = y * padded as usize;
+            pixels.extend_from_slice(&data[start..start + row as usize]);
+        }
+        drop(data);
+        buffer.unmap();
+        unpremultiply(&mut pixels);
+        Ok(pixels)
+    }
 }
 
 /// The GPU blends premultiplied; image files expect straight alpha.
@@ -196,17 +284,17 @@ mod tests {
     use super::*;
     use fanimate_core::samples;
 
-    /// Needs a GPU (or a software adapter such as lavapipe or WARP).
-    /// Skips, with a note, on machines with neither.
+    /// GPU tests need a GPU (or a software adapter such as lavapipe or
+    /// WARP) and skip, with a note, on machines with neither.
+    fn gpu_or_skip() -> Option<Gpu> {
+        Gpu::headless()
+            .inspect_err(|e| eprintln!("skipping GPU test: {e}"))
+            .ok()
+    }
+
     #[test]
     fn renders_hello_sample() {
-        let gpu = match Gpu::headless() {
-            Ok(gpu) => gpu,
-            Err(e) => {
-                eprintln!("skipping GPU test: {e}");
-                return;
-            }
-        };
+        let Some(gpu) = gpu_or_skip() else { return };
         let doc = samples::hello();
         let (w, h) = (320, 180);
         let px = render_to_rgba(&gpu, &doc, 0.0, w, h).unwrap();
@@ -226,6 +314,42 @@ mod tests {
         // the F's stem is white: stem centre is at x = 570 of 1280
         let stem = at(570 * w / 1280, h / 2 + 30);
         assert!(stem.iter().all(|&c| c >= 250), "{stem:?}");
+    }
+
+    /// Headless rendering is deterministic: a frame gives the same pixels
+    /// drawn fresh or on a target that has already drawn other frames.
+    #[test]
+    fn same_frame_renders_identically() {
+        let Some(gpu) = gpu_or_skip() else { return };
+        let doc = samples::benchmark(40);
+        let (w, h) = (320, 180);
+        let fresh = render_to_rgba(&gpu, &doc, 12.0, w, h).unwrap();
+
+        let mut target = Offscreen::new(&gpu, w, h);
+        for frame in [0.0, 60.0, 12.0] {
+            target.draw(&gpu, &doc, frame);
+        }
+        assert_eq!(target.read_rgba(&gpu).unwrap(), fresh);
+
+        // and the benchmark really is animated, so the check means something
+        target.draw(&gpu, &doc, 60.0);
+        assert_ne!(target.read_rgba(&gpu).unwrap(), fresh);
+    }
+
+    /// The OpenGL driver is only loaded when DirectX 12 has no GPU, because
+    /// Intel's crashes intermittently at process exit.
+    #[cfg(windows)]
+    #[test]
+    fn windows_leaves_opengl_out_when_directx_has_a_gpu() {
+        if std::env::var_os("WGPU_BACKEND").is_some() {
+            return;
+        }
+        let expected = if has_hardware_adapter(wgpu::Backends::DX12) {
+            wgpu::Backends::DX12
+        } else {
+            wgpu::Backends::DX12 | wgpu::Backends::GL
+        };
+        assert_eq!(backends(), expected);
     }
 
     #[test]

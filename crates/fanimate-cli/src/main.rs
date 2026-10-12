@@ -3,18 +3,18 @@
 
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use fanimate_core::eval::Evaluator;
 use fanimate_core::{Document, samples};
-use fanimate_render::{Gpu, Mesh, Tessellator, render_to_rgba};
+use fanimate_render::{Gpu, Mesh, Offscreen, Tessellator, render_to_rgba};
 
 const USAGE: &str = "\
 usage:
   fanimate-cli sample <hello|benchmark> <out.fnm> [--bones N]
   fanimate-cli validate <project.fnm> [--repair]
   fanimate-cli render <project.fnm> -o <out.png> [--frame N] [--width W] [--height H]
-  fanimate-cli bench [--bones N] [--frames N]";
+  fanimate-cli bench [--bones N] [--frames N] [--gpu [--width W] [--height H]]";
 
 fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
@@ -174,9 +174,10 @@ fn output_size(doc: &Document, w: Option<u32>, h: Option<u32>) -> (u32, u32) {
 }
 
 /// CPU-side benchmark: evaluate and tessellate every frame, plus file
-/// save and load. GPU frame rate is measured by `fanimate --bench`.
+/// save and load. `--gpu` adds the full render path without a window (see
+/// [`bench_gpu`]); `fanimate --bench` measures it in the app, UI included.
 fn bench(args: &[String]) -> CmdResult {
-    let a = Args::parse(args, &["--bones", "--frames"])?;
+    let a = Args::parse(args, &["--bones", "--frames", "--width", "--height"])?;
     let bones: usize = a.get("--bones")?.unwrap_or(40);
     let frames: u32 = a.get("--frames")?.unwrap_or(2000);
     let doc = samples::benchmark(bones);
@@ -227,8 +228,73 @@ fn bench(args: &[String]) -> CmdResult {
         "  load .fnm    {:>8.1} ms (with validation)",
         load_t.as_secs_f64() * 1000.0
     );
+    if a.has("--gpu") {
+        let size = (
+            a.get("--width")?.unwrap_or(1280),
+            a.get("--height")?.unwrap_or(800),
+        );
+        bench_gpu(&doc, frames, size)?;
+    }
     if cfg!(debug_assertions) {
         println!("  note: debug build; use --release for real numbers");
     }
     Ok(ExitCode::SUCCESS)
+}
+
+/// Longest the GPU part of the benchmark runs, so a slow software renderer
+/// on a CI machine does not hold up a release for minutes.
+const GPU_BENCH_LIMIT: Duration = Duration::from_secs(10);
+
+/// Evaluate, tessellate and draw frames offscreen with 4x MSAA, as the
+/// canvas does, waiting for the GPU after each one. Waiting gives up the
+/// overlap a window gets between CPU and GPU work, so the frame rate is a
+/// conservative figure for the same machine.
+fn bench_gpu(doc: &Document, frames: u32, (width, height): (u32, u32)) -> Result<(), String> {
+    let gpu = Gpu::headless().map_err(|e| e.to_string())?;
+    let mut target = Offscreen::new(&gpu, width, height);
+    let frame_at = |i: u32| doc.start as f32 + (i as f32 * 0.5) % doc.frame_count() as f32;
+
+    // the first frames include pipeline and buffer setup
+    for i in 0..10 {
+        target.draw(&gpu, doc, frame_at(i));
+    }
+    target.wait(&gpu).map_err(|e| e.to_string())?;
+
+    let mut times = Vec::with_capacity(frames as usize);
+    let started = Instant::now();
+    for i in 0..frames {
+        let t0 = Instant::now();
+        target.draw(&gpu, doc, frame_at(i));
+        target.wait(&gpu).map_err(|e| e.to_string())?;
+        times.push(t0.elapsed());
+        if started.elapsed() > GPU_BENCH_LIMIT {
+            break;
+        }
+    }
+    let total = started.elapsed().as_secs_f64();
+    times.sort_unstable();
+    let ms = |d: Duration| d.as_secs_f64() * 1000.0;
+    let p95 = times[(times.len() * 95 / 100).min(times.len() - 1)];
+
+    let info = gpu.adapter.get_info();
+    println!(
+        "  GPU render   {:>8.1} fps at {width}x{height}, 4x MSAA ({} frames, {} triangles)",
+        times.len() as f64 / total,
+        times.len(),
+        target.triangles()
+    );
+    println!(
+        "  frame time   {:>8.3} ms median, {:.3} ms 95th percentile, {:.3} ms slowest",
+        ms(times[times.len() / 2]),
+        ms(p95),
+        ms(times[times.len() - 1])
+    );
+    println!(
+        "  adapter      {} ({:?}, {:?})",
+        info.name, info.backend, info.device_type
+    );
+    if gpu.is_software() {
+        println!("  note: software renderer; these numbers say nothing about GPU speed");
+    }
+    Ok(())
 }

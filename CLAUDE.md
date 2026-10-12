@@ -8,7 +8,7 @@ Fanimate is a free, open-source 2D character animation app. It keeps what animat
 
 **One-line pitch:** Moho's rigging, Harmony's drawing and pipeline, Animate's ease of use. Free, on every platform, with nothing locked away.
 
-**Where we are:** Phase 1 (Foundation), milestone M1 (engine spike), moving into the UI shell. Status lives in the "Status" section of [docs/roadmap/phase-1.md](docs/roadmap/phase-1.md). Update that section when you finish milestone work.
+**Where we are:** Phase 1 (Foundation). M1 (engine spike) is done on Windows, waiting only for macOS and Linux benchmark numbers on the [reference hardware](docs/reference-hardware.md); M2 (Draw) is next. Status lives in the "Status" section of [docs/roadmap/phase-1.md](docs/roadmap/phase-1.md). Update that section when you finish milestone work.
 
 ### Read these before non-trivial work
 
@@ -83,7 +83,7 @@ Key facts:
 - A channel's `base` is its value when unkeyed and, for bones, the rest pose.
 - The canvas renders through `fanimate-render` into a texture registered with egui (`canvas_gpu.rs`): render through an `Rgba8UnormSrgb` view, sample as `Rgba8Unorm`. Canvas and export share the renderer, so the screen matches the output.
 - **wgpu, winit and egui versions are coupled.** wgpu 30 / winit 0.30 / eframe and egui 0.36 / egui_dock 0.21. Upgrade them together and check `cargo tree -d` shows a single wgpu.
-- **Windows uses DirectX 12 (then GL) by default**, never Vulkan: the Vulkan driver for some Intel GPUs (seen on HD Graphics 520) crashes the process on load, uncatchably. `fanimate_render::backends()` is the single source of this choice; `WGPU_BACKEND` overrides it.
+- **Windows uses DirectX 12 by default**, never Vulkan, and OpenGL only when DirectX 12 has no hardware adapter: the Vulkan driver for some Intel GPUs (seen on HD Graphics 520) crashes the process on load, uncatchably, and the same machine's OpenGL driver crashes in about 1 of 40 runs at process exit even when merely loaded to list adapters. `fanimate_render::backends()` is the single source of this choice; `WGPU_BACKEND` overrides it.
 - egui turns Ctrl+C/X/V into `Event::Copy`/`Cut`/`Paste`, not key events; `app.rs` handles them directly. Shortcuts are ignored while a text field has focus, a modal or a menu is open.
 - **On Windows the app is a GUI program** (`windows_subsystem = "windows"`), so no console window opens. Print user-facing output with `crate::report`, which falls back to a message box when there is no console.
 - **A maximised borderless window must not cover the whole monitor.** winit sizes it to the work area, which is the whole monitor when the taskbar auto-hides; Windows then treats it as fullscreen (the taskbar stops appearing, Alt+Tab previews and OBS capture can go blank). `titlebar::track_window` replaces that maximise with a normal window one point short of the bottom edge. Keep it when changing window code.
@@ -94,6 +94,7 @@ Key facts:
 cargo run --release -p fanimate-app                 # run the app
 cargo run --release -p fanimate-app -- --bench      # 10 s playback benchmark
 cargo run --release -p fanimate-cli -- bench        # CPU benchmark
+cargo run --release -p fanimate-cli -- bench --gpu  # plus offscreen GPU render, no window
 cargo run --release -p fanimate-cli -- render scene.fnm -o out.png --frame 12
 
 cargo fmt --all

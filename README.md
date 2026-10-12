@@ -14,7 +14,7 @@ Open-source 2D character animation. Rig it. Draw it. Move it.</p>
 
 Fanimate is a free, open-source 2D character animation app. It keeps what animators love about Moho Pro (bone rigging, Smart Bones, vector puppets), fixes the problems that push people away from it, and adds the best tools from Toon Boom Harmony and Adobe Animate.
 
-> **Status: Phase 1, milestone M1.** The core engine, GPU renderer, `.fnm` file format and the app's interface work: you can open and save projects, organise layers, move and animate them on the timeline, and play rigs back. Drawing and bone tools are not built yet (milestones M2 and M3), so Fanimate is not ready for real work. Progress is tracked in the [Phase 1 plan](docs/roadmap/phase-1.md#status).
+> **Status: Phase 1, end of milestone M1.** The core engine, GPU renderer, `.fnm` file format and the app's interface work: you can open and save projects, organise layers, move and animate them on the timeline, and play rigs back. Drawing and bone tools are not built yet (milestones M2 and M3), so Fanimate is not ready for real work. Progress is tracked in the [Phase 1 plan](docs/roadmap/phase-1.md#status).
 
 ## Try it
 
@@ -85,7 +85,8 @@ fanimate/
 │   ├── fanimate-editor/   Editing model: commands, undo, clipboard, keymaps (no UI code)
 │   ├── fanimate-app/      Desktop app (the `fanimate` binary): title bar, panels, canvas
 │   └── fanimate-cli/      Headless tool: render, validate, benchmark
-├── docs/                  Vision, roadmap, file format spec, legal scope
+├── docs/                  Vision, roadmap, file format spec, reference hardware, legal scope
+├── corpus/                Import test files and their consent record
 ├── brand/                 Logo, icons, design tokens, fonts and build script
 ├── scripts/release.js     `pnpm release`: check, version, tag and push
 └── .github/               Release workflow, issue and pull request templates
