@@ -7,6 +7,7 @@ pub enum Action {
     // File
     New,
     Open,
+    OpenSample(Sample),
     Save,
     SaveAs,
     Quit,
@@ -60,6 +61,9 @@ impl Action {
         match self {
             New => "New",
             Open => "Open…",
+            OpenSample(Sample::Hello) => "Open Sample: Hello Fanimate",
+            OpenSample(Sample::Benchmark) => "Open Sample: Benchmark Rig",
+            OpenSample(Sample::StressTest) => "Open Sample: Stress Test",
             Save => "Save",
             SaveAs => "Save As…",
             Quit => "Quit",
@@ -146,8 +150,45 @@ impl Action {
             FitView,
             ActualSize,
         ];
+        v.extend(Sample::ALL.iter().map(|s| OpenSample(*s)));
         v.extend(crate::action::Tool::ALL.iter().map(|t| Tool(*t)));
         v
+    }
+
+    /// Whether the action closes the open document, so unsaved changes must
+    /// be saved or discarded first.
+    pub fn closes_document(self) -> bool {
+        matches!(self, Self::New | Self::Open | Self::OpenSample(_) | Self::Quit)
+    }
+}
+
+/// The sample projects in File › Open Sample.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Sample {
+    Hello,
+    Benchmark,
+    StressTest,
+}
+
+impl Sample {
+    pub const ALL: [Sample; 3] = [Self::Hello, Self::Benchmark, Self::StressTest];
+
+    /// The name in the Open Sample menu.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Hello => "Hello Fanimate",
+            Self::Benchmark => "Benchmark rig (40 bones)",
+            Self::StressTest => "Stress test (400 bones)",
+        }
+    }
+
+    pub fn document(self) -> fanimate_core::Document {
+        use fanimate_core::samples;
+        match self {
+            Self::Hello => samples::hello(),
+            Self::Benchmark => samples::benchmark(40),
+            Self::StressTest => samples::benchmark(400),
+        }
     }
 }
 
@@ -181,6 +222,8 @@ pub enum Tool {
     TranslatePoints,
     AddPoint,
     Freehand,
+    Rectangle,
+    Ellipse,
     Eraser,
     PaintBucket,
     Eyedropper,
@@ -194,11 +237,13 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 13] = [
+    pub const ALL: [Tool; 15] = [
         Self::SelectPoints,
         Self::TranslatePoints,
         Self::AddPoint,
         Self::Freehand,
+        Self::Rectangle,
+        Self::Ellipse,
         Self::Eraser,
         Self::PaintBucket,
         Self::Eyedropper,
@@ -216,6 +261,8 @@ impl Tool {
             Self::TranslatePoints => "Transform Points",
             Self::AddPoint => "Add Point",
             Self::Freehand => "Freehand",
+            Self::Rectangle => "Rectangle",
+            Self::Ellipse => "Ellipse",
             Self::Eraser => "Eraser",
             Self::PaintBucket => "Paint Bucket",
             Self::Eyedropper => "Eyedropper",
@@ -230,9 +277,13 @@ impl Tool {
 
     pub fn group(self) -> ToolGroup {
         match self {
-            Self::SelectPoints | Self::TranslatePoints | Self::AddPoint | Self::Freehand | Self::Eraser => {
-                ToolGroup::Draw
-            }
+            Self::SelectPoints
+            | Self::TranslatePoints
+            | Self::AddPoint
+            | Self::Freehand
+            | Self::Rectangle
+            | Self::Ellipse
+            | Self::Eraser => ToolGroup::Draw,
             Self::PaintBucket | Self::Eyedropper => ToolGroup::Fill,
             Self::TransformLayer => ToolGroup::Layer,
             Self::SelectBone | Self::AddBone | Self::ManipulateBones => ToolGroup::Bone,
@@ -243,7 +294,26 @@ impl Tool {
     /// Whether the tool works yet. Others are shown so the layout is
     /// complete, and say which milestone brings them.
     pub fn is_available(self) -> bool {
-        matches!(self, Self::TransformLayer | Self::Pan | Self::Zoom)
+        matches!(
+            self,
+            Self::SelectPoints
+                | Self::TranslatePoints
+                | Self::Freehand
+                | Self::Eraser
+                | Self::Rectangle
+                | Self::Ellipse
+                | Self::PaintBucket
+                | Self::Eyedropper
+                | Self::TransformLayer
+                | Self::Pan
+                | Self::Zoom
+        )
+    }
+
+    /// Whether the tool works on points, so Delete and Select All act on
+    /// points rather than layers.
+    pub fn edits_points(self) -> bool {
+        matches!(self, Self::SelectPoints | Self::TranslatePoints)
     }
 
     /// Status-bar help while the tool is active.
@@ -252,15 +322,27 @@ impl Tool {
             Self::TransformLayer => {
                 "Drag to move the selected layer. If the layer is animated, a keyframe is set on the current frame."
             }
+            Self::Freehand => {
+                "Draw brush strokes on the selected vector layer. A pen's pressure sets the width; set the size, smoothing and taper in the Style panel."
+            }
+            Self::Rectangle => "Drag to draw a rectangle. Shift makes a square; Alt draws from the centre.",
+            Self::Ellipse => "Drag to draw an ellipse. Shift makes a circle; Alt draws from the centre.",
+            Self::PaintBucket => {
+                "Click a shape to fill it with the fill colour, or a brush stroke to recolour it with the line colour."
+            }
+            Self::Eyedropper => "Click a shape to use its colours for new artwork.",
+            Self::Eraser => {
+                "Drag to erase lines and brush strokes on the selected layer. Shapes it covers completely are removed."
+            }
             Self::Pan => "Drag to pan the canvas. Middle-drag pans with any tool.",
             Self::Zoom => "Click to zoom in, Alt-click to zoom out. Ctrl+scroll zooms with any tool.",
-            Self::SelectPoints
-            | Self::TranslatePoints
-            | Self::AddPoint
-            | Self::Freehand
-            | Self::Eraser
-            | Self::PaintBucket
-            | Self::Eyedropper => "Drawing tools arrive in milestone M2.",
+            Self::SelectPoints => {
+                "Click a point to select it, Shift-click to add, or drag a box around points. Drag selected points to move them."
+            }
+            Self::TranslatePoints => {
+                "Drag to move the selected points, or the nearest point if none are selected."
+            }
+            Self::AddPoint => "This drawing tool is coming later in milestone M2.",
             Self::SelectBone | Self::AddBone | Self::ManipulateBones => "Bone tools arrive in milestone M3.",
         }
     }

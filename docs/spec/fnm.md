@@ -1,6 +1,6 @@
-# The `.fnm` project format, version 0
+# The `.fnm` project format
 
-**Status: draft.** Version 0 is the format written during Phase 1 development. It may still change before 1.0, but every change will bump the version, and Fanimate will always open files written by earlier versions.
+**Current version: 1. Status: draft.** The format may still change before Fanimate 1.0, but every change that older readers would misread bumps the version, and Fanimate always opens files written by earlier versions. See [Version history](#version-history).
 
 The reference implementation is the [`fanimate-fnm`](../../crates/fanimate-fnm/) crate.
 
@@ -35,8 +35,8 @@ Identifies the folder as a Fanimate project.
 ```json
 {
   "format": "fnm",
-  "version": 0,
-  "generator": "fanimate 0.0.1"
+  "version": 1,
+  "generator": "fanimate 0.0.6"
 }
 ```
 
@@ -130,8 +130,28 @@ A skeleton. Shapes on vector layers anywhere inside `children` can bind to its b
 | `style.fill` | colour | Optional. Non-zero fill rule. |
 | `style.stroke` | object | Optional. `color` and `width` (document units). |
 | `bone` | integer | Optional. Index of the bone this shape follows, in the nearest enclosing bone layer. |
+| `widths` | array of numbers | Optional (version 1). The stroke's [width profile](#width-profiles). |
 
 A bound shape's points are stored in the **rest pose**. At each frame the shape moves rigidly with its bone: from the bone's rest transform to its current transform. Weighted deformation (one point following several bones) will be added in a later version.
+
+### Width profiles
+
+Brush strokes vary in width along their length, from pen pressure and tapered ends. A shape records this as `widths`: one number per **on-curve point** of its path, each a multiple of `style.stroke.width`.
+
+```json
+{
+  "name": "Stroke",
+  "path": [{"M": [10.0, 40.0]}, {"C": [[20.0, 30.0], [40.0, 30.0], [50.0, 40.0]]}, {"L": [90.0, 40.0]}],
+  "style": {"stroke": {"color": "#1C0B3D", "width": 8.0}},
+  "widths": [0.05, 1.0, 0.3]
+}
+```
+
+- On-curve points are the points of `M`, `L` and the end point of `C`, in order; `Z` has none. The example has three, so `widths` has three values, and the stroke is 0.4, 8 and 2.4 units wide at them.
+- Between two points the width changes smoothly along the segment.
+- Values are finite and not negative. A profile whose length does not match the path is ignored: the stroke is drawn at `style.stroke.width` everywhere.
+- A stroke with a profile has round caps and round joins. Without one, caps are flat (butt) and joins are mitred.
+- `widths` has no effect on fills, or on a shape without a stroke.
 
 ## Paths
 
@@ -214,6 +234,10 @@ To make saving safe against crashes and full disks, a writer should:
 
 If step 3 fails, put the old copy back. At no point is the only copy of the project half-written.
 
+## Crash recovery copies
+
+While a project is open, Fanimate keeps a copy of it in its data folder, updated after every action, so a crash loses at most the action being written. The copy is an ordinary `.fnm` project folder (`project.fnm`) next to a `session.json` saying where the project is saved and whether it had unsaved changes. Each file in the copy is replaced atomically. The copy is deleted when Fanimate closes normally. Nothing else in this specification depends on it.
+
 ## Validation
 
 Readers should validate on load. Fanimate's validator reports, and on request repairs, the following:
@@ -228,6 +252,8 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | `next_layer_id` not above every id | Error | Set to highest id + 1 |
 | Bone parent not before the bone | Error | Make the bone a root |
 | Non-positive `fps`, `width` or `height`; bad frame range | Error | Reset to defaults |
+| Width profile whose length does not match the path's on-curve points | Error | Remove the profile |
+| Negative or non-finite value in a width profile | Error | Non-finite becomes 1, negative becomes 0 |
 | Shape bound to a bone that does not exist, or outside any bone layer | Warning | Unbind the shape |
 | Keyframe after the `end` frame | Warning | None; the key is kept |
 | Opacity outside 0 to 1 | Warning | None; clamped when drawn |
@@ -238,3 +264,10 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 - Readers refuse files with a newer version than they support, rather than guessing.
 - Fanimate opens every older version, converting on load.
 - Format changes are proposed in an issue and documented here before they ship (see [GOVERNANCE.md](../../GOVERNANCE.md)).
+
+## Version history
+
+| Version | First written by | Changes | Converting older files |
+|---|---|---|---|
+| 0 | Fanimate 0.0.1 | First version: layers, shapes, bones, channels | |
+| 1 | Fanimate 0.0.6 | Shapes may have a stroke width profile (`widths`), written by the brush | Version 0 files need no conversion. A version 0 reader would ignore `widths` and draw brush strokes at one width, so the version was bumped. |

@@ -227,6 +227,8 @@ const FANIMATE: &[(&str, Action)] = &[
     ("Q", Tool(Tool::TranslatePoints)),
     ("P", Tool(Tool::AddPoint)),
     ("B", Tool(Tool::Freehand)),
+    ("R", Tool(Tool::Rectangle)),
+    ("O", Tool(Tool::Ellipse)),
     ("E", Tool(Tool::Eraser)),
     ("K", Tool(Tool::PaintBucket)),
     ("I", Tool(Tool::Eyedropper)),

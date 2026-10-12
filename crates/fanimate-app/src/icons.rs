@@ -59,6 +59,8 @@ impl Icon {
                 Tool::TranslatePoints => lucide!("move"),
                 Tool::AddPoint => lucide!("pen-tool"),
                 Tool::Freehand => lucide!("pencil"),
+                Tool::Rectangle => lucide!("square"),
+                Tool::Ellipse => lucide!("circle"),
                 Tool::Eraser => lucide!("eraser"),
                 Tool::PaintBucket => lucide!("paint-bucket"),
                 Tool::Eyedropper => lucide!("pipette"),

@@ -12,7 +12,7 @@ Companion to the [product vision](../product-vision.md). The brand assets propos
 |---|---|
 | M0: Ground work | **Done** |
 | M1: Engine spike | **Done on Windows**; macOS and Linux measurements outstanding |
-| M2: Draw | Next |
+| M2: Draw | **In progress** |
 | M3 to M6 | Not started |
 
 ### M0: Ground work (done)
@@ -28,7 +28,7 @@ Companion to the [product vision](../product-vision.md). The brand assets propos
 
 - [x] Core engine: scene graph, animation channels, bones with forward kinematics, rigid binding, frame evaluation (`fanimate-core`)
 - [x] Renderer: lyon tessellation and a wgpu pipeline with 4× MSAA, shared by the canvas and export (`fanimate-render`)
-- [x] `.fnm` v0: reader, atomic writer, validator with self-repair, and the [specification](../spec/fnm-v0.md) (`fanimate-fnm`)
+- [x] `.fnm` v0: reader, atomic writer, validator with self-repair, and the [specification](../spec/fnm.md) (`fanimate-fnm`)
 - [x] Headless rendering to PNG (`fanimate-cli render`)
 - [x] Benchmark scenes and tools (`fanimate --bench`, `fanimate-cli bench`)
 - [x] Engine crates compile to WebAssembly
@@ -66,6 +66,30 @@ Companion to the [product vision](../product-vision.md). The brand assets propos
 Ranges are from separate runs on different days. The CLI figure is lower than the app's because it waits for the GPU after every frame instead of overlapping CPU and GPU work. The 60 fps budget holds with plenty of room on this machine. The benchmark rig does not use Smart Bones or weighted deformation yet (they arrive in M3), so expect these numbers to fall as those features land; every release build runs the benchmark so regressions show up.
 
 **Known driver issues.** The Vulkan driver for Intel HD Graphics 520 crashes the process while loading, before wgpu can report an error, and its OpenGL driver crashes in about 1 of 40 runs as the process exits, even when it was only loaded to list adapters. Fanimate therefore uses DirectX 12 on Windows and enables OpenGL only when DirectX 12 has no hardware adapter; `WGPU_BACKEND` (for example `vulkan` or `gl`) still overrides this.
+
+### M2: Draw (in progress)
+
+Exit check: an artist can draw, animate by keyframes, save and recover after a forced crash.
+
+- [x] Brush strokes stored as a centreline plus a width profile (`.fnm` version 1, [spec](../spec/fnm.md#width-profiles)): pen pressure and naturally tapered ends, simplified to few editable points and joined with smooth curves, so there are no odd curves at stroke ends (P9)
+- [x] Stabiliser that smooths shaky lines without lagging: the line on screen always reaches the pen and ends where it lifts
+- [x] Freehand tool that reads pressure from pens and touch screens through the windowing layer (not yet tried on tablet hardware), a live preview drawn by the real renderer, and a brush-size cursor; drawing with no vector layer selected makes a new layer, inside a selected group or bone layer
+- [x] Rectangle and Ellipse tools (Shift for square or circle, Alt from the centre)
+- [x] Eraser that cuts strokes and lines where it passes and removes shapes it covers; one drag is one undo step
+- [x] Paint Bucket (fills shapes, recolours brush strokes) and Eyedropper
+- [x] Select Points and Transform Points: click, Shift or Ctrl-click and box selection; drag to move with curve handles following; Delete, Select All and Select None act on points while a point tool is active
+- [x] Style panel: line colour, width, outline, fill, smoothing, taper and eraser size for new artwork, remembered between sessions
+- [x] Exact hit testing (inside fills, near strokes) for selection, Paint Bucket and Eyedropper
+- [x] Crash recovery journal: after every action the open project is copied, in the background and one changed layer at a time, to a recovery folder; after a crash, the next start offers the unsaved work. A test kills a real process mid-session and checks the work comes back intact
+- [x] Open Sample now asks about unsaved changes like New and Open (it used to discard them)
+- [ ] Add Point and a pen tool for construction drawing
+- [ ] Per-object undo history that survives a crash, with a history panel (undo is still whole-document snapshots)
+- [ ] Timeline key editing: drag keys to retime, choose interpolation (smooth, linear, step) from the key menu
+- [ ] Boolean shape tools (union, subtract, intersect)
+- [ ] Animating points (point keyframes), so drawings can change shape over time
+- [ ] Usability pass with an artist, then the exit check
+
+Not yet tested by hand: pen pressure on a real tablet, and the drawing tools' feel at different zooms. The editing logic behind every tool is covered by unit tests.
 
 ### First 30 days checklist (section 7)
 

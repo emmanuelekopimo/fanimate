@@ -1,5 +1,5 @@
-//! The canvas: the GPU-rendered document, plus navigation, the Transform
-//! Layer tool, click-to-select and overlays.
+//! The canvas: the GPU-rendered document, plus navigation, the drawing
+//! and Transform Layer tools, click-to-select and overlays.
 
 use eframe::egui::{self, Color32, Pos2, Rect, Sense, Stroke};
 use fanimate_core::{Color, LayerId, LayerKind, Vec2, evaluate};
@@ -36,6 +36,11 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
 
     navigate(&ctx, &response, shell, rect, &to_doc);
     transform_tool(&ctx, &response, shell, &to_doc);
+    freehand_tool(&ctx, &response, shell, &to_doc);
+    eraser_tool(&ctx, &response, shell, &to_doc);
+    let shape_preview = shape_tools(&ctx, &response, shell, &to_doc);
+    click_tools(&response, shell, &to_doc);
+    point_tools(&ctx, &response, shell, &to_doc);
     if response.hovered() || response.dragged() {
         ctx.set_cursor_icon(tool_cursor(&ctx, &response, shell.editor.tool));
     }
@@ -53,6 +58,7 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
         );
         let p = shell.palette.pasteboard;
         let pasteboard = Color::rgb(p.r() as f32 / 255.0, p.g() as f32 / 255.0, p.b() as f32 / 255.0);
+        let preview = shell.editor.stroke_preview().or(shape_preview);
         let id = canvas.draw(
             rs,
             &shell.editor.doc,
@@ -60,6 +66,7 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
             size_px,
             &view,
             pasteboard,
+            preview.as_ref(),
         );
         let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
         ui.painter().image(id, rect, uv, Color32::WHITE);
@@ -75,6 +82,8 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
     }
 
     overlays(ui, shell, rect, &to_screen);
+    point_overlay(ui, shell, rect, &to_screen);
+    brush_cursor(ui, &response, shell);
 
     menus::context_menu(&response, |ui| {
         menus::item(ui, shell, Action::FitView);
@@ -94,9 +103,16 @@ fn tool_cursor(ctx: &egui::Context, response: &egui::Response, tool: Tool) -> eg
     }
     match tool {
         // Windows has no hand cursors, so panning shows the move arrows
-        Tool::Pan | Tool::TransformLayer => CursorIcon::Move,
+        Tool::Pan | Tool::TransformLayer | Tool::TranslatePoints => CursorIcon::Move,
+        Tool::SelectPoints => CursorIcon::Default,
         Tool::Zoom if ctx.input(|i| i.modifiers.alt) => CursorIcon::ZoomOut,
         Tool::Zoom => CursorIcon::ZoomIn,
+        Tool::Freehand
+        | Tool::Eraser
+        | Tool::Rectangle
+        | Tool::Ellipse
+        | Tool::PaintBucket
+        | Tool::Eyedropper => CursorIcon::Crosshair,
         // tools that arrive in later milestones do nothing here yet
         _ => CursorIcon::NotAllowed,
     }
@@ -214,22 +230,329 @@ fn transform_tool(
     }
 }
 
-/// The deepest layer with a shape whose bounds contain `p`, topmost first.
+/// Brush strokes. Every pointer position since the last frame is used, not
+/// just the latest, so fast strokes keep their shape. A pen reports touch
+/// events with pressure; a mouse has none and draws at full pressure.
+fn freehand_tool(
+    ctx: &egui::Context,
+    response: &egui::Response,
+    shell: &mut Shell,
+    to_doc: &impl Fn(Vec2, f32, Pos2) -> Vec2,
+) {
+    if shell.editor.tool != Tool::Freehand {
+        if shell.editor.is_drawing() {
+            shell.editor.cancel_stroke();
+        }
+        return;
+    }
+    let (center, zoom) = (shell.view.center, shell.view.zoom);
+    let doc = |p: Pos2| to_doc(center, zoom, p);
+    let (moves, press_origin) = pointer_moves(ctx);
+    let pressure = moves.first().map_or(1.0, |m| m.1);
+
+    if response.clicked_by(egui::PointerButton::Primary)
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        // a tap leaves a dot
+        if shell.editor.begin_stroke(doc(pos), pressure, zoom) {
+            shell.editor.finish_stroke();
+        }
+        return;
+    }
+    if response.drag_started_by(egui::PointerButton::Primary) {
+        // start where the button went down: the drag only registers after
+        // the pointer has moved a little
+        let start = press_origin.or(response.interact_pointer_pos());
+        if let Some(start) = start
+            && !shell.editor.begin_stroke(doc(start), pressure, zoom)
+        {
+            return;
+        }
+    }
+    if shell.editor.is_drawing() {
+        for (pos, pressure) in &moves {
+            shell.editor.continue_stroke(doc(*pos), *pressure);
+        }
+        if response.drag_stopped() || !response.dragged_by(egui::PointerButton::Primary) {
+            shell.editor.finish_stroke();
+        }
+    }
+}
+
+/// Every pointer position since the last frame, with pen pressure (1 for
+/// a mouse), and where the button went down.
+fn pointer_moves(ctx: &egui::Context) -> (Vec<(Pos2, f32)>, Option<Pos2>) {
+    ctx.input(|i| {
+        let (mut pen, mut mouse) = (Vec::new(), Vec::new());
+        for event in &i.events {
+            match event {
+                egui::Event::Touch {
+                    pos,
+                    force,
+                    phase: egui::TouchPhase::Start | egui::TouchPhase::Move,
+                    ..
+                } => pen.push((*pos, force.unwrap_or(1.0))),
+                egui::Event::PointerMoved(pos) => mouse.push((*pos, 1.0)),
+                _ => {}
+            }
+        }
+        // egui also turns pen input into pointer moves; prefer the pen's own
+        (if pen.is_empty() { mouse } else { pen }, i.pointer.press_origin())
+    })
+}
+
+/// The Eraser: one drag is one undo step.
+fn eraser_tool(
+    ctx: &egui::Context,
+    response: &egui::Response,
+    shell: &mut Shell,
+    to_doc: &impl Fn(Vec2, f32, Pos2) -> Vec2,
+) {
+    if shell.editor.tool != Tool::Eraser {
+        shell.editor.end_erase();
+        return;
+    }
+    let (center, zoom) = (shell.view.center, shell.view.zoom);
+    let doc = |p: Pos2| to_doc(center, zoom, p);
+    let (moves, press_origin) = pointer_moves(ctx);
+    if response.clicked_by(egui::PointerButton::Primary)
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        shell.editor.begin_erase(doc(pos), zoom);
+        shell.editor.end_erase();
+        return;
+    }
+    if response.drag_started_by(egui::PointerButton::Primary)
+        && let Some(start) = press_origin.or(response.interact_pointer_pos())
+        && !shell.editor.begin_erase(doc(start), zoom)
+    {
+        return;
+    }
+    if shell.editor.is_erasing() {
+        for (pos, _) in &moves {
+            shell.editor.erase_to(doc(*pos));
+        }
+        if response.drag_stopped() || !response.dragged_by(egui::PointerButton::Primary) {
+            shell.editor.end_erase();
+        }
+    }
+}
+
+/// A circle the size of the brush or eraser around the pointer, drawn in a
+/// dark and a light ring so it shows on any artwork.
+fn brush_cursor(ui: &egui::Ui, response: &egui::Response, shell: &Shell) {
+    let size = match shell.editor.tool {
+        Tool::Freehand => shell.editor.draw.width,
+        Tool::Eraser => shell.editor.draw.eraser,
+        _ => return,
+    };
+    let Some(pos) = response.hover_pos().or(response.interact_pointer_pos()) else {
+        return;
+    };
+    let r = size * shell.view.zoom / 2.0;
+    if r >= 2.0 {
+        let painter = ui.painter_at(response.rect);
+        painter.circle_stroke(pos, r, Stroke::new(1.0, shell.palette.bg));
+        painter.circle_stroke(pos, r + 1.0, Stroke::new(1.0, shell.palette.text));
+    }
+}
+
+/// How close, in screen pixels, a click must be to a shape to hit it.
+const HIT_SLOP_PX: f32 = 4.0;
+
+/// The layer of the topmost shape under `p`.
 fn hit_test(shell: &Shell, p: Vec2) -> Option<LayerId> {
-    let items = evaluate(&shell.editor.doc, shell.editor.frame);
-    items
-        .iter()
-        .rev()
-        .find(|item| {
-            bounds(
-                item.shape
-                    .path
-                    .points()
-                    .map(|q| item.transform.transform_point2(q)),
-            )
-            .is_some_and(|(lo, hi)| p.cmpge(lo).all() && p.cmple(hi).all())
-        })
-        .map(|item| item.layer)
+    shell
+        .editor
+        .shape_at(p, HIT_SLOP_PX / shell.view.zoom)
+        .map(|(layer, _)| layer)
+}
+
+/// Rectangle and Ellipse: drag out a shape. Shift keeps the sides equal;
+/// Alt grows it from where the drag started. Returns the shape being
+/// dragged, to preview.
+fn shape_tools(
+    ctx: &egui::Context,
+    response: &egui::Response,
+    shell: &mut Shell,
+    to_doc: &impl Fn(Vec2, f32, Pos2) -> Vec2,
+) -> Option<fanimate_core::Shape> {
+    let tool = shell.editor.tool;
+    if !matches!(tool, Tool::Rectangle | Tool::Ellipse) {
+        shell.ui.shape_drag = None;
+        return None;
+    }
+    let (center, zoom) = (shell.view.center, shell.view.zoom);
+    let (mods, press_origin) = ctx.input(|i| (i.modifiers, i.pointer.press_origin()));
+    if response.drag_started_by(egui::PointerButton::Primary) {
+        shell.ui.shape_drag = press_origin.map(|p| to_doc(center, zoom, p));
+    }
+    let from = shell.ui.shape_drag?;
+    let to = to_doc(center, zoom, response.interact_pointer_pos()?);
+    if response.drag_stopped() {
+        shell.ui.shape_drag = None;
+        shell
+            .editor
+            .add_drag_shape(tool, from, to, mods.shift, mods.alt, zoom);
+        return None;
+    }
+    shell
+        .editor
+        .drag_shape(tool, from, to, mods.shift, mods.alt, zoom)
+}
+
+/// A point gesture on the canvas.
+#[derive(Clone, Copy, Debug)]
+pub enum PointGesture {
+    /// Moving the selected points; where the pointer was last frame.
+    Move(Vec2),
+    /// Dragging a selection box from this screen position.
+    Box(Pos2),
+}
+
+/// Select Points and Transform Points. Clicking a point selects it (Shift
+/// or Ctrl adds). With Select Points, dragging a selected point moves the
+/// selection and dragging elsewhere draws a selection box; Transform
+/// Points moves the selection from anywhere.
+fn point_tools(
+    ctx: &egui::Context,
+    response: &egui::Response,
+    shell: &mut Shell,
+    to_doc: &impl Fn(Vec2, f32, Pos2) -> Vec2,
+) {
+    let tool = shell.editor.tool;
+    if !tool.edits_points() {
+        shell.ui.point_gesture = None;
+        return;
+    }
+    let (center, zoom) = (shell.view.center, shell.view.zoom);
+    let doc = |p: Pos2| to_doc(center, zoom, p);
+    let slop = POINT_SLOP_PX / zoom;
+    let (mods, press_origin) = ctx.input(|i| (i.modifiers, i.pointer.press_origin()));
+    let adding = mods.shift || mods.command;
+    let mode = if mods.command {
+        SelectMode::Toggle
+    } else if mods.shift {
+        SelectMode::Range
+    } else {
+        SelectMode::Replace
+    };
+
+    if response.clicked_by(egui::PointerButton::Primary)
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        match shell.editor.point_at(doc(pos), slop) {
+            Some(point) => shell.editor.select_point(point, mode),
+            None if !adding => shell.editor.points.clear(),
+            None => {}
+        }
+        return;
+    }
+
+    if response.drag_started_by(egui::PointerButton::Primary)
+        && let Some(start) = press_origin
+    {
+        let hit = shell.editor.point_at(doc(start), slop);
+        if let Some(point) = hit
+            && !shell.editor.points.contains(&point)
+        {
+            shell
+                .editor
+                .select_point(point, if adding { mode } else { SelectMode::Replace });
+        }
+        let moving = hit.is_some() || tool == Tool::TranslatePoints;
+        if tool == Tool::TranslatePoints && hit.is_none() && shell.editor.points.is_empty() {
+            // nothing selected: move the nearest point, if one is close
+            if let Some(point) = shell.editor.point_at(doc(start), slop * 4.0) {
+                shell.editor.select_point(point, SelectMode::Replace);
+            }
+        }
+        shell.ui.point_gesture = if moving {
+            shell
+                .editor
+                .begin_point_drag()
+                .then_some(PointGesture::Move(doc(start)))
+        } else {
+            Some(PointGesture::Box(start))
+        };
+    }
+
+    let Some(gesture) = shell.ui.point_gesture else {
+        return;
+    };
+    let Some(pos) = response.interact_pointer_pos() else {
+        return;
+    };
+    match gesture {
+        PointGesture::Move(last) => {
+            let now = doc(pos);
+            shell.editor.drag_points(now - last);
+            shell.ui.point_gesture = Some(PointGesture::Move(now));
+        }
+        PointGesture::Box(start) if response.drag_stopped() => {
+            shell.editor.select_points_in(doc(start), doc(pos), adding);
+        }
+        PointGesture::Box(_) => {}
+    }
+    if response.drag_stopped() || !response.dragged_by(egui::PointerButton::Primary) {
+        shell.ui.point_gesture = None;
+    }
+}
+
+/// How close, in screen pixels, a click must be to a point to pick it.
+const POINT_SLOP_PX: f32 = 6.0;
+
+/// The point layer's points as small squares, filled when selected, and
+/// the selection box being dragged.
+fn point_overlay(ui: &egui::Ui, shell: &Shell, rect: Rect, to_screen: &impl Fn(Vec2, f32, Vec2) -> Pos2) {
+    if !shell.editor.tool.edits_points() {
+        return;
+    }
+    let painter = ui.painter_at(rect);
+    let (c, z, p) = (shell.view.center, shell.view.zoom, shell.palette);
+    for (point, pos) in shell.editor.point_positions() {
+        let r = Rect::from_center_size(to_screen(c, z, pos), egui::vec2(7.0, 7.0));
+        let selected = shell.editor.points.contains(&point);
+        painter.rect_filled(r, 1.0, if selected { p.accent } else { p.panel });
+        painter.rect_stroke(
+            r,
+            1.0,
+            Stroke::new(1.0, if selected { p.text } else { p.accent }),
+            egui::StrokeKind::Inside,
+        );
+    }
+    if let Some(PointGesture::Box(start)) = shell.ui.point_gesture
+        && let Some(now) = ui.ctx().pointer_latest_pos()
+    {
+        let r = Rect::from_two_pos(start, now);
+        painter.rect_filled(r, 0.0, p.accent.gamma_multiply(0.12));
+        painter.rect_stroke(r, 0.0, Stroke::new(1.0, p.accent), egui::StrokeKind::Inside);
+    }
+}
+
+/// Paint Bucket and Eyedropper act on the shape clicked.
+fn click_tools(response: &egui::Response, shell: &mut Shell, to_doc: &impl Fn(Vec2, f32, Pos2) -> Vec2) {
+    let tool = shell.editor.tool;
+    if !matches!(tool, Tool::PaintBucket | Tool::Eyedropper)
+        || !response.clicked_by(egui::PointerButton::Primary)
+    {
+        return;
+    }
+    let Some(pos) = response.interact_pointer_pos() else {
+        return;
+    };
+    let p = to_doc(shell.view.center, shell.view.zoom, pos);
+    let slop = HIT_SLOP_PX / shell.view.zoom;
+    let hit = if tool == Tool::PaintBucket {
+        shell.editor.paint_at(p, slop) || shell.editor.shape_at(p, slop).is_some()
+    } else {
+        shell.editor.pick_style_at(p, slop)
+    };
+    if !hit {
+        shell
+            .editor
+            .set_status(fanimate_editor::StatusKind::Info, "Click on a shape");
+    }
 }
 
 fn bounds(points: impl Iterator<Item = Vec2>) -> Option<(Vec2, Vec2)> {

@@ -1,6 +1,6 @@
 //! The dockable panels and the status bar.
 
-mod canvas;
+pub mod canvas;
 mod layers;
 mod properties;
 mod style;

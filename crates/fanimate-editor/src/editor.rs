@@ -1,6 +1,6 @@
 //! The editor: an open document plus everything about editing it.
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use fanimate_core::anim::Animatable;
@@ -13,6 +13,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::action::{Action, Tool};
 use crate::history::History;
+
+mod draw;
+mod points;
+pub use draw::DrawStyle;
+pub use points::PointRef;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SelectMode {
@@ -69,8 +74,13 @@ pub struct Editor {
     pub path: Option<PathBuf>,
     /// Unsaved changes.
     pub dirty: bool,
+    /// Counts edits, undos and redos, so the app can tell when the document
+    /// changed (for the crash recovery journal).
+    revision: u64,
     /// Selected layers in click order; the last is the primary selection.
     pub selection: Vec<LayerId>,
+    /// Selected points, for the point tools.
+    pub points: BTreeSet<PointRef>,
     /// Current time; fractional while playing.
     pub frame: f32,
     pub playing: bool,
@@ -81,6 +91,12 @@ pub struct Editor {
     /// Set when the UI should start renaming a layer in place.
     pub rename_request: Option<LayerId>,
     pub status: Option<(StatusKind, String)>,
+    /// Colours and brush settings for new artwork.
+    pub draw: DrawStyle,
+    /// The brush stroke being drawn.
+    stroke: Option<draw::StrokeInProgress>,
+    /// The eraser gesture in progress.
+    erase: Option<draw::EraseInProgress>,
     clipboard: Option<String>,
     /// Last plainly clicked layer, the anchor for Shift-click ranges.
     anchor: Option<LayerId>,
@@ -93,7 +109,9 @@ impl Editor {
             doc,
             path: None,
             dirty: false,
+            revision: 0,
             selection: Vec::new(),
+            points: BTreeSet::new(),
             frame,
             playing: false,
             tool: Tool::default(),
@@ -101,6 +119,9 @@ impl Editor {
             collapsed: HashSet::new(),
             rename_request: None,
             status: None,
+            draw: DrawStyle::default(),
+            stroke: None,
+            erase: None,
             clipboard: None,
             anchor: None,
         }
@@ -132,6 +153,21 @@ impl Editor {
         Ok((ed, report))
     }
 
+    /// Adopt work recovered after a crash. It is unsaved until saved
+    /// again, to `path` if it had been saved before.
+    pub fn recovered(doc: Document, path: Option<PathBuf>) -> Self {
+        let mut ed = Self::new(doc);
+        ed.path = path;
+        ed.dirty = true;
+        ed.set_status(StatusKind::Success, "Recovered unsaved work. Save to keep it.");
+        ed
+    }
+
+    /// See the `revision` field.
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     pub fn save_to(&mut self, path: &Path) -> Result<(), FnmError> {
         fanimate_fnm::save(&self.doc, path)?;
         self.path = Some(path.to_path_buf());
@@ -149,6 +185,7 @@ impl Editor {
     pub fn checkpoint(&mut self, label: &'static str) {
         self.history.push(label, &self.doc, &self.selection);
         self.dirty = true;
+        self.revision += 1;
     }
 
     // ------------------------------------------------------------------
@@ -175,6 +212,12 @@ impl Editor {
                 self.paste(None);
             }
             Duplicate => self.duplicate(),
+            // with a point tool, editing commands act on points
+            Delete if self.tool.edits_points() && !self.points.is_empty() => {
+                self.delete_points();
+            }
+            SelectAll if self.tool.edits_points() => self.select_all_points(),
+            SelectNone if self.tool.edits_points() => self.points.clear(),
             Delete => self.delete_selected(),
             SelectAll => self.select_all(),
             SelectNone => self.selection.clear(),
@@ -206,8 +249,8 @@ impl Editor {
                 use crate::action::Tool as T;
                 self.set_tool(if bone { T::AddBone } else { T::AddPoint });
             }
-            New | Open | Save | SaveAs | Quit | Preferences | CommandPalette | LayerProperties | ZoomIn
-            | ZoomOut | FitView | ActualSize => return Outcome::App(action),
+            New | Open | OpenSample(_) | Save | SaveAs | Quit | Preferences | CommandPalette
+            | LayerProperties | ZoomIn | ZoomOut | FitView | ActualSize => return Outcome::App(action),
         }
         Outcome::Done
     }
@@ -246,6 +289,7 @@ impl Editor {
         match self.history.undo(&mut self.doc, &mut self.selection) {
             Some(label) => {
                 self.dirty = true;
+                self.revision += 1;
                 self.prune_selection();
                 self.set_status(StatusKind::Info, format!("Undid {label}"));
             }
@@ -257,6 +301,7 @@ impl Editor {
         match self.history.redo(&mut self.doc, &mut self.selection) {
             Some(label) => {
                 self.dirty = true;
+                self.revision += 1;
                 self.prune_selection();
                 self.set_status(StatusKind::Info, format!("Redid {label}"));
             }
@@ -267,6 +312,7 @@ impl Editor {
     fn prune_selection(&mut self) {
         let doc = &self.doc;
         self.selection.retain(|id| doc.find(*id).is_some());
+        self.prune_points();
     }
 
     // ------------------------------------------------------------------
@@ -474,9 +520,6 @@ impl Editor {
     /// Paste layers from `text` (the system clipboard) if it holds Fanimate
     /// layers, else from the internal clipboard. Returns whether anything
     /// was pasted.
-    // `version <= FORMAT_VERSION` is always `== 0` today, but must stay a
-    // range check so clipboards from older format versions keep pasting.
-    #[allow(clippy::absurd_extreme_comparisons)]
     pub fn paste(&mut self, text: Option<&str>) -> bool {
         let parse = |t: &str| {
             serde_json::from_str::<ClipboardData>(t)
@@ -1192,6 +1235,41 @@ mod tests {
                 .transform_point2(Vec2::ZERO)
                 .abs_diff_eq(Vec2::new(10.0, 0.0), 1e-5)
         );
+    }
+
+    #[test]
+    fn opening_a_sample_is_left_to_the_app_and_closes_the_document() {
+        let mut ed = Editor::untitled();
+        let open = Action::OpenSample(crate::Sample::Hello);
+        assert_eq!(ed.run(open), Outcome::App(open));
+        // so the app asks about unsaved changes first, as for New and Open
+        assert!(open.closes_document());
+        assert!(Action::New.closes_document() && Action::Quit.closes_document());
+        assert!(!Action::Save.closes_document());
+    }
+
+    #[test]
+    fn revision_counts_edits_undos_and_redos() {
+        let (mut ed, _) = three();
+        let r0 = ed.revision();
+        ed.run(Action::NewVectorLayer);
+        assert_eq!(ed.revision(), r0 + 1);
+        ed.run(Action::Undo);
+        ed.run(Action::Redo);
+        assert_eq!(ed.revision(), r0 + 3);
+        // nothing to undo past the start: no change
+        ed.run(Action::Undo);
+        ed.run(Action::Undo);
+        let r = ed.revision();
+        ed.run(Action::Undo);
+        assert_eq!(ed.revision(), r);
+    }
+
+    #[test]
+    fn recovered_work_is_unsaved_and_keeps_its_path() {
+        let ed = Editor::recovered(samples::hello(), Some(PathBuf::from("scene.fnm")));
+        assert!(ed.dirty);
+        assert_eq!(ed.path.as_deref(), Some(Path::new("scene.fnm")));
     }
 
     #[test]

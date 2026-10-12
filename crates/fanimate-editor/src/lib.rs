@@ -11,7 +11,7 @@ mod editor;
 mod history;
 mod keymap;
 
-pub use action::{Action, Tool, ToolGroup};
-pub use editor::{Editor, Outcome, Placement, SelectMode, StatusKind};
+pub use action::{Action, Sample, Tool, ToolGroup};
+pub use editor::{DrawStyle, Editor, Outcome, Placement, PointRef, SelectMode, StatusKind};
 pub use history::History;
 pub use keymap::{Chord, Keymap, KeymapKind};

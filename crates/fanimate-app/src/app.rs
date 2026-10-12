@@ -6,11 +6,12 @@ use std::time::{Duration, Instant};
 use eframe::egui::{self, CursorIcon, Key, Modifiers};
 use egui_dock::{DockArea, DockState, NodeIndex};
 use fanimate_core::LayerId;
-use fanimate_editor::{Action, Chord, Editor, Keymap, KeymapKind, Outcome, StatusKind};
+use fanimate_editor::{Action, Chord, DrawStyle, Editor, Keymap, KeymapKind, Outcome, StatusKind};
 use serde::{Deserialize, Serialize};
 
 use crate::canvas_gpu::CanvasGpu;
 use crate::panels::{self, Tab, TabViewer};
+use crate::recovery::{self, Recovery};
 use crate::theme::{self, Palette, Theme};
 use crate::{dialogs, titlebar};
 
@@ -25,6 +26,7 @@ struct Settings {
     keymap: String,
     theme: Theme,
     welcome_done: bool,
+    draw: DrawStyle,
 }
 
 impl Default for Settings {
@@ -33,6 +35,7 @@ impl Default for Settings {
             keymap: KeymapKind::Fanimate.id().into(),
             theme: Theme::Night,
             welcome_done: false,
+            draw: DrawStyle::default(),
         }
     }
 }
@@ -77,6 +80,10 @@ pub struct UiState {
     pub focus_properties: bool,
     /// Layer transform when a canvas drag started.
     pub drag_origin: Option<(LayerId, fanimate_core::Transform)>,
+    /// Where a Rectangle or Ellipse drag started, in document space.
+    pub shape_drag: Option<fanimate_core::Vec2>,
+    /// A point tool drag in progress.
+    pub point_gesture: Option<crate::panels::canvas::PointGesture>,
     /// The status message on screen, and when it appeared.
     pub status_since: Option<(String, Instant)>,
     /// Timeline zoom (pixels per frame) and horizontal scroll (frames).
@@ -109,6 +116,8 @@ pub struct Shell {
     pub bench: Option<Bench>,
     /// The app icon, for the title bar.
     pub icon: egui::TextureHandle,
+    /// The crash recovery journal, and work recovered from a crash.
+    pub recovery: Recovery,
     last_tick: Instant,
     allow_close: bool,
 }
@@ -161,6 +170,7 @@ impl FanimateApp {
         if let Some((kind, msg)) = status {
             editor.set_status(kind, msg);
         }
+        editor.draw = settings.draw;
 
         let canvas = cc.wgpu_render_state.as_ref().map(CanvasGpu::new);
         let gpu_name = cc
@@ -173,10 +183,17 @@ impl FanimateApp {
             .unwrap_or_else(|| "no GPU".into());
 
         let icon = load_icon(&cc.egui_ctx);
-        Self {
+        // the benchmark leaves no trace
+        let recovery_root = if opts.bench_bones.is_some() {
+            None
+        } else {
+            recovery::root()
+        };
+        let mut app = Self {
             dock,
             shell: Shell {
                 icon,
+                recovery: Recovery::new(recovery_root),
                 editor,
                 keymap: Keymap::new(KeymapKind::from_id(&settings.keymap).unwrap_or_default()),
                 theme: settings.theme,
@@ -202,7 +219,9 @@ impl FanimateApp {
                 last_tick: Instant::now(),
                 allow_close: false,
             },
-        }
+        };
+        recovery::start(&mut app.shell);
+        app
     }
 }
 
@@ -284,6 +303,7 @@ impl eframe::App for FanimateApp {
         for action in std::mem::take(&mut shell.pending) {
             dispatch(&ctx, shell, action);
         }
+        recovery::tick(&ctx, shell);
         if let Some(tab) = shell.ui.open_tab.take() {
             match self.dock.find_tab(&tab) {
                 Some(path) => {
@@ -334,9 +354,14 @@ impl eframe::App for FanimateApp {
                 keymap: s.keymap.kind.id().into(),
                 theme: s.theme,
                 welcome_done: !s.ui.show_welcome,
+                draw: s.editor.draw,
             },
         );
         eframe::set_value(storage, DOCK_KEY, &self.dock);
+    }
+
+    fn on_exit(&mut self) {
+        recovery::end(&mut self.shell);
     }
 }
 
@@ -392,7 +417,7 @@ fn native_cursors(ctx: &egui::Context) {
 
 fn any_modal_open(shell: &Shell) -> bool {
     let u = &shell.ui;
-    u.palette.is_some() || u.confirm_discard.is_some() || u.show_welcome
+    u.palette.is_some() || u.confirm_discard.is_some() || u.show_welcome || !shell.recovery.offered.is_empty()
 }
 
 /// Keyboard shortcuts and clipboard events.
@@ -438,7 +463,7 @@ fn chord_of(key: Key, m: Modifiers) -> Chord {
 /// Run an action from any source: menu, shortcut, context menu, palette.
 pub fn dispatch(ctx: &egui::Context, shell: &mut Shell, action: Action) {
     // actions that would throw away unsaved work ask first
-    if matches!(action, Action::New | Action::Open | Action::Quit) && shell.editor.dirty {
+    if action.closes_document() && shell.editor.dirty {
         shell.ui.confirm_discard = Some(action);
         return;
     }
@@ -452,10 +477,10 @@ pub fn run_unchecked(ctx: &egui::Context, shell: &mut Shell, action: Action) {
         Outcome::CopyText(text) => ctx.copy_text(text),
         Outcome::App(a) => match a {
             Action::New => {
-                shell.editor = Editor::untitled();
-                shell.view.fit();
+                shell.replace_editor(Editor::untitled());
             }
             Action::Open => open_dialog(shell),
+            Action::OpenSample(sample) => shell.replace_editor(Editor::new(sample.document())),
             Action::Save => {
                 save(shell, false);
             }
@@ -494,8 +519,7 @@ fn open_dialog(shell: &mut Shell) {
     };
     match Editor::open(&path) {
         Ok((ed, report)) => {
-            shell.editor = ed;
-            shell.view.fit();
+            shell.replace_editor(ed);
             if report.is_clean() {
                 shell
                     .editor
@@ -528,7 +552,11 @@ pub fn save(shell: &mut Shell, ask: bool) -> bool {
         }
     };
     match shell.editor.save_to(&path) {
-        Ok(()) => true,
+        Ok(()) => {
+            // saved: a crash now would lose nothing
+            recovery::record(shell);
+            true
+        }
         Err(e) => {
             shell
                 .editor
@@ -539,6 +567,14 @@ pub fn save(shell: &mut Shell, ask: bool) -> bool {
 }
 
 impl Shell {
+    /// Switch to another document, keeping the brush and colours.
+    pub fn replace_editor(&mut self, mut editor: Editor) {
+        editor.draw = self.editor.draw;
+        self.editor = editor;
+        self.view.fit();
+        recovery::start(self);
+    }
+
     pub fn set_theme(&mut self, ctx: &egui::Context, theme: Theme) {
         self.theme = theme;
         self.palette = theme::apply(ctx, theme);

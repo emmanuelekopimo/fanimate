@@ -7,8 +7,8 @@
 
 use eframe::egui;
 use eframe::egui_wgpu::RenderState;
-use fanimate_core::Document;
 use fanimate_core::eval::Evaluator;
+use fanimate_core::{Affine2, Document, DrawItem, LayerId, Shape};
 use fanimate_render::{Mesh, RenderTarget, Renderer, Tessellator, View};
 
 const SAMPLE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -46,6 +46,9 @@ impl CanvasGpu {
     }
 
     /// Draw `doc` at `frame` into a `size`-pixel texture and return its id.
+    /// `extra` (the brush stroke being drawn, in document space) goes on
+    /// top, through the same renderer, so the preview is exactly the result.
+    #[allow(clippy::too_many_arguments)]
     pub fn draw(
         &mut self,
         rs: &RenderState,
@@ -54,6 +57,7 @@ impl CanvasGpu {
         size: [u32; 2],
         view: &View,
         pasteboard: fanimate_core::Color,
+        extra: Option<&Shape>,
     ) -> egui::TextureId {
         let size = [size[0].max(1), size[1].max(1)];
         if self.target.as_ref().is_none_or(|t| t.size != size) {
@@ -64,6 +68,14 @@ impl CanvasGpu {
         let started = std::time::Instant::now();
         let mut items = Vec::new();
         self.evaluator.evaluate_into(doc, frame, &mut items);
+        if let Some(shape) = extra {
+            items.push(DrawItem {
+                layer: LayerId(0),
+                shape,
+                transform: Affine2::IDENTITY,
+                opacity: 1.0,
+            });
+        }
         self.mesh.vertices.clear();
         self.mesh.indices.clear();
         self.tess.tolerance = 0.25 / view.zoom.max(0.01);

@@ -13,15 +13,17 @@
 //!
 //! Splitting layers into separate files keeps Git diffs small and lets two
 //! artists edit different layers without conflicts. The full specification
-//! is in `docs/spec/fnm-v0.md`.
+//! is in `docs/spec/fnm.md`.
 //!
 //! Every load runs the [validator](validate), so damaged files are reported
 //! (or repaired) instead of silently slowing the app down.
 
 mod io;
+pub mod journal;
 pub mod validate;
 
 pub use io::{FORMAT_NAME, FORMAT_VERSION, load, load_and_repair, save};
+pub use journal::{Journal, Recoverable, SessionInfo, find_recoverable};
 pub use validate::{Issue, Report, Severity, repair, validate};
 
 use std::path::PathBuf;

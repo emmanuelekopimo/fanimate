@@ -21,6 +21,7 @@ mod dialogs;
 mod icons;
 mod menus;
 mod panels;
+mod recovery;
 mod theme;
 mod titlebar;
 

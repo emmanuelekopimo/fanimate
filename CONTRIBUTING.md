@@ -6,14 +6,15 @@ By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Where things stand
 
-Fanimate is in **Phase 1**. Milestone M1 (engine spike) proved the architecture: the core engine, the GPU renderer, the `.fnm` file format and the app shell with its Moho-style layout. It is done on Windows and waits for benchmark numbers from macOS and Linux. Next is M2 (Draw): drawing tools, keyframe animation and the autosave journal. See the [Phase 1 plan](docs/roadmap/phase-1.md) for details.
+Fanimate is in **Phase 1**. Milestone M1 (engine spike) proved the architecture: the core engine, the GPU renderer, the `.fnm` file format and the app shell with its Moho-style layout. It is done on Windows and waits for benchmark numbers from macOS and Linux. M2 (Draw) is in progress: the brush, shape, eraser, fill and point tools and crash recovery work; point animation, timeline key editing and per-object undo come next. See the [Phase 1 plan](docs/roadmap/phase-1.md#status) for details.
 
 Good ways to help right now:
 
 - Run the benchmark on your machine, especially on macOS or Linux, and post the numbers in an issue (see [Benchmarks](#benchmarks)).
+- Try the drawing tools with a pen tablet and report how pressure and smoothing feel.
 - Contribute Moho, Animate, SVG or PSD files to the [import test corpus](corpus/README.md) (open an issue first; we need permission to use each file).
 - Pick up an issue labelled `good first issue`.
-- Review the [product vision](docs/product-vision.md) and the [`.fnm` specification](docs/spec/fnm-v0.md) and open issues where they are unclear or wrong.
+- Review the [product vision](docs/product-vision.md) and the [`.fnm` specification](docs/spec/fnm.md) and open issues where they are unclear or wrong.
 
 ## Getting started
 

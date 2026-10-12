@@ -8,7 +8,7 @@ Fanimate is a free, open-source 2D character animation app. It keeps what animat
 
 **One-line pitch:** Moho's rigging, Harmony's drawing and pipeline, Animate's ease of use. Free, on every platform, with nothing locked away.
 
-**Where we are:** Phase 1 (Foundation). M1 (engine spike) is done on Windows, waiting only for macOS and Linux benchmark numbers on the [reference hardware](docs/reference-hardware.md); M2 (Draw) is next. Status lives in the "Status" section of [docs/roadmap/phase-1.md](docs/roadmap/phase-1.md). Update that section when you finish milestone work.
+**Where we are:** Phase 1 (Foundation). M1 (engine spike) is done on Windows, waiting only for macOS and Linux benchmark numbers on the [reference hardware](docs/reference-hardware.md). M2 (Draw) is in progress: the brush, shape, eraser, fill and point tools and crash recovery are in; see the status for what remains. Status lives in the "Status" section of [docs/roadmap/phase-1.md](docs/roadmap/phase-1.md). Update that section when you finish milestone work.
 
 ### Read these before non-trivial work
 
@@ -16,7 +16,7 @@ Fanimate is a free, open-source 2D character animation app. It keeps what animat
 |---|---|
 | [docs/product-vision.md](docs/product-vision.md) | The why: pain points P1 to P24, principles, feature specs. Every feature should trace back to a pain point. |
 | [docs/roadmap/phase-1.md](docs/roadmap/phase-1.md) | What is in and out of scope now, workstreams, milestones, Gate 1 tests, current status |
-| [docs/spec/fnm-v0.md](docs/spec/fnm-v0.md) | The project file format. Must match `crates/fanimate-fnm` exactly. |
+| [docs/spec/fnm.md](docs/spec/fnm.md) | The project file format. Must match `crates/fanimate-fnm` exactly. |
 | [brand/README.md](brand/README.md) | Colours, themes, icon and wordmark rules |
 | [CONTRIBUTING.md](CONTRIBUTING.md), [GOVERNANCE.md](GOVERNANCE.md) | Workflow, review standards, release process |
 
@@ -26,7 +26,7 @@ Fanimate is a free, open-source 2D character animation app. It keeps what animat
 2. **Never lose work.** Saving is atomic (write a temp folder, swap it in). Loading validates and repairs. No panics on user data: bad input becomes a validator issue or an error message. Anything touching save, load or undo needs tests, including the failure path.
 3. **Fast by default.** The Gate 1 budget is 60 fps for a 40-bone rig with 10 Smart Bones on a mid-range laptop, project open under 3 s, no UI action over 100 ms. Per-frame code (evaluation, tessellation, rendering) must not allocate needlessly; give before and after numbers when you change it.
 4. **Polish before features.** A smaller finished feature beats a larger half-finished one. Unfinished tools are shown but clearly marked with the milestone that brings them; they never pretend to work.
-5. **The file format is a public contract.** Any change to what `.fnm` writes needs: an update to `docs/spec/fnm-v0.md`, a version bump if older readers would misread it, a migration on load, validator coverage, and a round-trip test. Files from any released version must always open.
+5. **The file format is a public contract.** Any change to what `.fnm` writes needs: an update to `docs/spec/fnm.md`, a version bump if older readers would misread it, a migration on load, validator coverage, and a round-trip test. Files from any released version must always open.
 6. **Ask before outward-facing actions.** Do not commit, push, tag, create releases or change GitHub settings unless the user asks. Releases go through `pnpm release` only.
 
 ## UI and UX rules
@@ -77,6 +77,9 @@ crates/
 Dependencies point downwards only: core ← fnm ← editor ← app; core ← render ← app/cli. **Keep `fanimate-core` free of UI, GPU and platform code** (it runs headless and in the browser), and **keep `fanimate-editor` free of egui** so every command is unit-tested without a window. If logic can live in `fanimate-editor`, it belongs there, with a test.
 
 Key facts:
+
+- **Crash recovery depends on `Editor::revision`.** It goes up on every `checkpoint`, undo and redo, and the app journals the document once the revision changes and no gesture is in progress (`fanimate-app/src/recovery.rs`, `fanimate_fnm::journal`). An edit that changes the document without a checkpoint is only journalled by the 10-second backstop, so always checkpoint.
+- A brush stroke is an ordinary shape: its path is the centreline and `Shape::widths` the width profile (one value per on-curve point). Anything that adds or removes points must keep `widths` in step (`Shape::remove_points` does).
 
 - Document space has **y pointing down**, angles in **radians**, positive is clockwise on screen. Frames are integers; frame 0 is the first; negative keyframes are invalid.
 - Layers are drawn first to last (last is on top). The Layers and Timeline panels list them **top of stack first** (`Editor::display_rows`).

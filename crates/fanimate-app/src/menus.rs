@@ -2,7 +2,7 @@
 //! the same command always looks and behaves the same.
 
 use eframe::egui;
-use fanimate_editor::{Action, KeymapKind, Tool};
+use fanimate_editor::{Action, KeymapKind, Sample, Tool};
 
 use crate::app::Shell;
 use crate::panels::Tab;
@@ -51,6 +51,8 @@ pub fn item(ui: &mut egui::Ui, shell: &mut Shell, action: Action) {
             .history
             .redo_label()
             .map_or("Redo".to_owned(), |l| format!("Redo {l}")),
+        // the submenu already says "Open Sample"
+        Action::OpenSample(sample) => sample.name().to_owned(),
         a => a.label().to_owned(),
     };
     // the gap applies on both sides of the stretch before the shortcut, so
@@ -73,20 +75,9 @@ fn items(ui: &mut egui::Ui, shell: &mut Shell, actions: &[Action]) {
 pub fn file(ui: &mut egui::Ui, shell: &mut Shell) {
     items(ui, shell, &[Action::New, Action::Open]);
     ui.menu_button("Open Sample", |ui| {
-        if ui.button("Hello Fanimate").clicked() {
-            shell.editor = fanimate_editor::Editor::sample();
-            shell.view.fit();
-            ui.close();
-        }
-        if ui.button("Benchmark rig (40 bones)").clicked() {
-            shell.editor = fanimate_editor::Editor::new(fanimate_core::samples::benchmark(40));
-            shell.view.fit();
-            ui.close();
-        }
-        if ui.button("Stress test (400 bones)").clicked() {
-            shell.editor = fanimate_editor::Editor::new(fanimate_core::samples::benchmark(400));
-            shell.view.fit();
-            ui.close();
+        ui.set_min_width(MENU_MIN_WIDTH);
+        for sample in Sample::ALL {
+            item(ui, shell, Action::OpenSample(sample));
         }
     });
     ui.separator();

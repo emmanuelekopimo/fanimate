@@ -11,10 +11,14 @@ use crate::{FnmError, Result};
 
 pub const FORMAT_NAME: &str = "fnm";
 /// Version written by this build. Readers accept this version and older.
-pub const FORMAT_VERSION: u32 = 0;
+///
+/// - 0: the Phase 1 engine spike.
+/// - 1: shapes may carry a stroke width profile (`widths`), written by the
+///   brush. Version 0 files need no conversion.
+pub const FORMAT_VERSION: u32 = 1;
 
 #[derive(Serialize, Deserialize)]
-struct Manifest {
+pub(crate) struct Manifest {
     format: String,
     version: u32,
     #[serde(default)]
@@ -23,7 +27,7 @@ struct Manifest {
 
 /// `document.json`: everything except the layers themselves.
 #[derive(Serialize, Deserialize)]
-struct DocumentFile {
+pub(crate) struct DocumentFile {
     name: String,
     width: f32,
     height: f32,
@@ -36,7 +40,7 @@ struct DocumentFile {
     layers: Vec<String>,
 }
 
-fn layer_file(layer: &Layer) -> String {
+pub(crate) fn layer_file(layer: &Layer) -> String {
     format!("layers/{:04}.json", layer.id.0)
 }
 
@@ -126,32 +130,42 @@ fn write_all(doc: &Document, dir: &Path) -> Result<()> {
     let layers_dir = dir.join("layers");
     fs::create_dir_all(&layers_dir).map_err(|e| io_err(&layers_dir, e))?;
 
-    write_json(
-        &dir.join("manifest.json"),
-        &Manifest {
-            format: FORMAT_NAME.into(),
-            version: FORMAT_VERSION,
-            generator: concat!("fanimate ", env!("CARGO_PKG_VERSION")).into(),
-        },
-    )?;
-    write_json(
-        &dir.join("document.json"),
-        &DocumentFile {
-            name: doc.name.clone(),
-            width: doc.width,
-            height: doc.height,
-            fps: doc.fps,
-            start: doc.start,
-            end: doc.end,
-            background: doc.background,
-            next_layer_id: doc.next_layer_id,
-            layers: doc.layers.iter().map(layer_file).collect(),
-        },
-    )?;
+    write_json(&dir.join("manifest.json"), &manifest())?;
+    write_json(&dir.join("document.json"), &document_file(doc))?;
     for layer in &doc.layers {
         write_json(&dir.join(layer_file(layer)), layer)?;
     }
     Ok(())
+}
+
+pub(crate) fn manifest() -> Manifest {
+    Manifest {
+        format: FORMAT_NAME.into(),
+        version: FORMAT_VERSION,
+        generator: concat!("fanimate ", env!("CARGO_PKG_VERSION")).into(),
+    }
+}
+
+pub(crate) fn document_file(doc: &Document) -> DocumentFile {
+    DocumentFile {
+        name: doc.name.clone(),
+        width: doc.width,
+        height: doc.height,
+        fps: doc.fps,
+        start: doc.start,
+        end: doc.end,
+        background: doc.background,
+        next_layer_id: doc.next_layer_id,
+        layers: doc.layers.iter().map(layer_file).collect(),
+    }
+}
+
+/// Write a JSON file so that it is never seen half-written: write a
+/// temporary file beside it, then rename it over the old one.
+pub(crate) fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    let tmp = path.with_extension("json.tmp");
+    write_json(&tmp, value)?;
+    fs::rename(&tmp, path).map_err(|e| io_err(path, e))
 }
 
 fn sibling(path: &Path, tag: &str) -> PathBuf {
@@ -179,7 +193,7 @@ fn write_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
     fs::write(path, text).map_err(|e| io_err(path, e))
 }
 
-fn io_err(path: &Path, source: std::io::Error) -> FnmError {
+pub(crate) fn io_err(path: &Path, source: std::io::Error) -> FnmError {
     FnmError::Io {
         path: path.to_path_buf(),
         source,
@@ -276,6 +290,48 @@ mod tests {
     fn rejects_folders_that_are_not_projects() {
         let dir = temp_dir("not-fnm");
         assert!(matches!(load(&dir), Err(FnmError::NotFnm(_))));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    /// Files from every released format version must keep opening. Each
+    /// fixture was written by the release that used that version.
+    #[test]
+    fn opens_version_0_projects() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/hello-v0.fnm");
+        let (doc, report) = load(&path).unwrap();
+        assert!(report.is_clean(), "{report}");
+        assert_eq!(doc, samples::hello());
+    }
+
+    #[test]
+    fn brush_strokes_round_trip() {
+        let dir = temp_dir("brush");
+        let path = dir.join("p.fnm");
+        let mut doc = samples::hello();
+        let samples: Vec<_> = (0..40)
+            .map(|i| {
+                fanimate_core::BrushSample::new(
+                    fanimate_core::Vec2::new(i as f32 * 5.0, (i as f32).sin() * 20.0),
+                    0.7,
+                )
+            })
+            .collect();
+        let opts = fanimate_core::BrushOptions {
+            color: fanimate_core::Color::BLACK,
+            size: 8.0,
+            taper: 15.0,
+            tolerance: 0.5,
+        };
+        let stroke = fanimate_core::brush::build_stroke(&samples, &opts).unwrap();
+        assert!(stroke.widths.is_some());
+        let layer = doc.new_layer("Ink", fanimate_core::LayerKind::vector(vec![stroke]));
+        doc.layers.push(layer);
+        save(&doc, &path).unwrap();
+        let manifest = fs::read_to_string(path.join("manifest.json")).unwrap();
+        assert!(manifest.contains(&format!("\"version\": {FORMAT_VERSION}")));
+        let (loaded, report) = load(&path).unwrap();
+        assert!(report.is_clean(), "{report}");
+        assert_eq!(loaded, doc);
         fs::remove_dir_all(dir).unwrap();
     }
 

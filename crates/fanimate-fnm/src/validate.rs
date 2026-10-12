@@ -235,11 +235,15 @@ impl Checker {
         match &mut layer.kind {
             LayerKind::Vector { shapes } => {
                 for (i, shape) in shapes.iter_mut().enumerate() {
-                    let Some(b) = shape.bone else { continue };
-                    let problem = match bones {
-                        None => Some("is bound to a bone but is not inside a bone layer".to_owned()),
-                        Some(n) if b >= n => Some(format!("is bound to bone {b}, but the skeleton has {n}")),
-                        Some(_) => None,
+                    let problem = match (shape.bone, bones) {
+                        (None, _) => None,
+                        (Some(_), None) => {
+                            Some("is bound to a bone but is not inside a bone layer".to_owned())
+                        }
+                        (Some(b), Some(n)) if b >= n => {
+                            Some(format!("is bound to bone {b}, but the skeleton has {n}"))
+                        }
+                        (Some(_), Some(_)) => None,
                     };
                     if let Some(p) = problem {
                         let sloc = format!("{loc} > shape {i} \"{}\"", shape.name);
@@ -257,6 +261,7 @@ impl Checker {
                         let sloc = format!("{loc} > shape {i} \"{}\"", shape.name);
                         self.issue(Severity::Error, &sloc, "path has non-finite points".into(), false);
                     }
+                    self.widths(shape, &format!("{loc} > shape {i} \"{}\"", shape.name));
                 }
             }
             LayerKind::Group { children } => {
@@ -302,6 +307,44 @@ impl Checker {
                 let n = skeleton.bones.len();
                 for child in children {
                     self.layer(child, end, Some(n));
+                }
+            }
+        }
+    }
+    /// A stroke's width profile: one finite, non-negative value per point.
+    fn widths(&mut self, shape: &mut fanimate_core::Shape, loc: &str) {
+        let points = shape.path.on_curve_count();
+        let Some(widths) = &mut shape.widths else { return };
+        if widths.len() != points {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!(
+                    "width profile has {} values for {points} points; the stroke is drawn at one width",
+                    widths.len()
+                ),
+                true,
+            );
+            if self.repair {
+                shape.widths = None;
+            }
+            return;
+        }
+        let bad = widths.iter().filter(|w| !(w.is_finite() && **w >= 0.0)).count();
+        if bad > 0 {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!("width profile has {bad} negative or non-finite value(s)"),
+                true,
+            );
+            if self.repair {
+                for w in widths.iter_mut() {
+                    if !w.is_finite() {
+                        *w = 1.0;
+                    } else if *w < 0.0 {
+                        *w = 0.0;
+                    }
                 }
             }
         }
@@ -471,6 +514,44 @@ mod tests {
         assert_eq!(validate(&doc).issues.len(), 1);
         repair(&mut doc);
         assert!(validate(&doc).is_clean());
+    }
+
+    fn stroke_doc(widths: Vec<f32>) -> Document {
+        use fanimate_core::{Color, Path, Shape, Style, Vec2};
+        let mut doc = Document::new("w", 100.0, 100.0, 24.0);
+        let path = Path::new().move_to(Vec2::ZERO).line_to(Vec2::new(10.0, 0.0));
+        let mut shape = Shape::new("ink", path, Style::default().with_stroke(Color::BLACK, 4.0));
+        shape.widths = Some(widths);
+        let layer = doc.new_layer("l", LayerKind::vector(vec![shape]));
+        doc.layers.push(layer);
+        doc
+    }
+
+    fn widths_of(doc: &Document) -> Option<Vec<f32>> {
+        let LayerKind::Vector { shapes } = &doc.layers[0].kind else {
+            unreachable!()
+        };
+        shapes[0].widths.clone()
+    }
+
+    #[test]
+    fn width_profile_with_wrong_length_is_dropped() {
+        let mut doc = stroke_doc(vec![1.0, 0.5, 0.2]);
+        let report = repair(&mut doc);
+        assert_eq!(report.issues.len(), 1, "{report}");
+        assert!(report.issues[0].repaired);
+        assert_eq!(widths_of(&doc), None);
+        assert!(validate(&doc).is_clean());
+    }
+
+    #[test]
+    fn bad_width_values_are_repaired() {
+        let mut doc = stroke_doc(vec![f32::NAN, -2.0]);
+        assert_eq!(validate(&doc).issues.len(), 1);
+        repair(&mut doc);
+        assert_eq!(widths_of(&doc), Some(vec![1.0, 0.0]));
+        assert!(validate(&doc).is_clean());
+        assert!(validate(&stroke_doc(vec![0.1, 1.0])).is_clean());
     }
 
     #[test]

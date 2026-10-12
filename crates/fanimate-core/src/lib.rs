@@ -10,15 +10,18 @@
 
 pub mod anim;
 pub mod bones;
+pub mod brush;
 pub mod color;
 pub mod eval;
 pub mod path;
+pub mod points;
 pub mod samples;
 pub mod scene;
 pub mod transform;
 
 pub use anim::{Channel, Frame, Interpolation, Key};
 pub use bones::{Bone, Skeleton};
+pub use brush::{BrushOptions, BrushSample, Stabiliser};
 pub use color::Color;
 pub use eval::{DrawItem, evaluate};
 pub use glam::{Affine2, Vec2};

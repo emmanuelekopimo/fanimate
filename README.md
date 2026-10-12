@@ -14,7 +14,7 @@ Open-source 2D character animation. Rig it. Draw it. Move it.</p>
 
 Fanimate is a free, open-source 2D character animation app. It keeps what animators love about Moho Pro (bone rigging, Smart Bones, vector puppets), fixes the problems that push people away from it, and adds the best tools from Toon Boom Harmony and Adobe Animate.
 
-> **Status: Phase 1, end of milestone M1.** The core engine, GPU renderer, `.fnm` file format and the app's interface work: you can open and save projects, organise layers, move and animate them on the timeline, and play rigs back. Drawing and bone tools are not built yet (milestones M2 and M3), so Fanimate is not ready for real work. Progress is tracked in the [Phase 1 plan](docs/roadmap/phase-1.md#status).
+> **Status: Phase 1, milestone M2 (Draw) in progress.** The core engine, GPU renderer, `.fnm` file format and the app's interface work: you can draw with a pressure-sensitive brush, add rectangles and ellipses, erase, fill and edit points, organise layers, animate them on the timeline, and get unsaved work back after a crash. Bone tools are not built yet (milestone M3), so Fanimate is not ready for real work. Progress is tracked in the [Phase 1 plan](docs/roadmap/phase-1.md#status).
 
 ## Try it
 
@@ -57,7 +57,7 @@ cargo run --release -p fanimate-cli -- validate hello.fnm
 |---|---|
 | [Product vision](docs/product-vision.md) | The problem, principles, full feature specification, AI, business model, roadmap and risks |
 | [Phase 1: Foundation](docs/roadmap/phase-1.md) | Status, branding, scope, workstreams, milestones and Gate 1 acceptance tests for version 1.0 |
-| [`.fnm` format specification](docs/spec/fnm-v0.md) | The open project file format |
+| [`.fnm` format specification](docs/spec/fnm.md) | The open project file format |
 | [Legal review scope](docs/legal/review-scope.md) | Questions for the legal review required before 1.0 |
 | [Brand guidelines](brand/README.md) | Logo, colours, themes, typography and how to rebuild the assets |
 | [Contributing](CONTRIBUTING.md) and [Governance](GOVERNANCE.md) | How to help and how decisions are made |

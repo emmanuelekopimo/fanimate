@@ -29,7 +29,7 @@ The product vision calls for a steering group of **working animators, studio tec
 
 ### Changes that need extra care
 
-- **The `.fnm` file format.** Any change to what is written to disk needs a `proposal` issue, an update to [the specification](docs/spec/fnm-v0.md), and a format version bump if older readers would misread the file. Files written by any released version must always open in later versions.
+- **The `.fnm` file format.** Any change to what is written to disk needs a `proposal` issue, an update to [the specification](docs/spec/fnm.md), and a format version bump if older readers would misread the file. Files written by any released version must always open in later versions.
 - **Licensing.** Dependencies must be compatible with MIT / Apache 2.0. Copyleft (GPL, LGPL) dependencies are not accepted in the app or engine.
 
 ## Releases

@@ -14,6 +14,11 @@ pub struct PaletteState {
 }
 
 pub fn show(ctx: &egui::Context, shell: &mut Shell) {
+    // recovering work after a crash comes before everything else
+    if !shell.recovery.offered.is_empty() {
+        crate::recovery::dialog(ctx, shell);
+        return;
+    }
     if shell.ui.show_welcome {
         welcome(ctx, shell);
     }
