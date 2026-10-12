@@ -1179,7 +1179,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-app"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "eframe",
  "egui_dock",
@@ -1201,7 +1201,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-cli"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "env_logger",
  "fanimate-core",
@@ -1212,7 +1212,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-core"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "glam",
  "serde",
@@ -1221,7 +1221,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-editor"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "fanimate-core",
  "fanimate-fnm",
@@ -1231,7 +1231,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-fnm"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "fanimate-core",
  "serde",
@@ -1241,7 +1241,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-render"
-version = "0.0.3"
+version = "0.0.4"
 dependencies = [
  "bytemuck",
  "fanimate-core",
