@@ -37,6 +37,10 @@ pub enum Icon {
     AddKey,
     DeleteKey,
     Keyboard,
+    Union,
+    Subtract,
+    Intersect,
+    History,
 }
 
 macro_rules! lucide {
@@ -57,7 +61,8 @@ impl Icon {
             Self::Tool(tool) => match tool {
                 Tool::SelectPoints => lucide!("square-dashed-mouse-pointer"),
                 Tool::TranslatePoints => lucide!("move"),
-                Tool::AddPoint => lucide!("pen-tool"),
+                Tool::AddPoint => lucide!("spline"),
+                Tool::Pen => lucide!("pen-tool"),
                 Tool::Freehand => lucide!("pencil"),
                 Tool::Rectangle => lucide!("square"),
                 Tool::Ellipse => lucide!("circle"),
@@ -92,6 +97,10 @@ impl Icon {
             Self::AddKey => lucide!("diamond-plus"),
             Self::DeleteKey => lucide!("diamond-minus"),
             Self::Keyboard => lucide!("keyboard"),
+            Self::Union => lucide!("squares-unite"),
+            Self::Subtract => lucide!("squares-subtract"),
+            Self::Intersect => lucide!("squares-intersect"),
+            Self::History => lucide!("history"),
         }
     }
 }
@@ -224,6 +233,10 @@ mod tests {
             Icon::AddKey,
             Icon::DeleteKey,
             Icon::Keyboard,
+            Icon::Union,
+            Icon::Subtract,
+            Icon::Intersect,
+            Icon::History,
         ]);
         icons
     }

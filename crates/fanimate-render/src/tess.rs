@@ -213,7 +213,8 @@ mod tests {
         shape.widths = widths;
         let item = DrawItem {
             layer: fanimate_core::LayerId(1),
-            shape: &shape,
+            index: 0,
+            shape: std::borrow::Cow::Borrowed(&shape),
             transform: Affine2::IDENTITY,
             opacity: 1.0,
         };

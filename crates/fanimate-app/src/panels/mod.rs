@@ -1,6 +1,7 @@
 //! The dockable panels and the status bar.
 
 pub mod canvas;
+mod history;
 mod layers;
 mod properties;
 mod style;
@@ -27,10 +28,11 @@ pub enum Tab {
     Properties,
     Style,
     Actions,
+    History,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 7] = [
+    pub const ALL: [Tab; 8] = [
         Self::Canvas,
         Self::Tools,
         Self::Layers,
@@ -38,6 +40,7 @@ impl Tab {
         Self::Properties,
         Self::Style,
         Self::Actions,
+        Self::History,
     ];
 
     pub fn title(self) -> &'static str {
@@ -49,6 +52,7 @@ impl Tab {
             Self::Properties => "Properties",
             Self::Style => "Style",
             Self::Actions => "Actions",
+            Self::History => "History",
         }
     }
 }
@@ -77,6 +81,7 @@ impl egui_dock::TabViewer for TabViewer<'_> {
             Tab::Layers => layers::show(ui, shell),
             Tab::Properties => properties::show(ui, shell),
             Tab::Style => style::show(ui, shell),
+            Tab::History => history::show(ui, shell),
             Tab::Actions => {
                 ui.add_space(8.0);
                 ui.label(RichText::new("Actions and Smart Bones").strong());
@@ -97,7 +102,7 @@ impl egui_dock::TabViewer for TabViewer<'_> {
 
     fn scroll_bars(&self, tab: &Tab) -> [bool; 2] {
         match tab {
-            Tab::Canvas | Tab::Timeline | Tab::Layers => [false, false],
+            Tab::Canvas | Tab::Timeline | Tab::Layers | Tab::History => [false, false],
             _ => [false, true],
         }
     }

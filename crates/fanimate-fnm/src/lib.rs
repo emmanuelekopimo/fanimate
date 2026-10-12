@@ -18,10 +18,12 @@
 //! Every load runs the [validator](validate), so damaged files are reported
 //! (or repaired) instead of silently slowing the app down.
 
+pub mod history;
 mod io;
 pub mod journal;
 pub mod validate;
 
+pub use history::{HistoryRecord, HistoryState};
 pub use io::{FORMAT_NAME, FORMAT_VERSION, load, load_and_repair, save};
 pub use journal::{Journal, Recoverable, SessionInfo, find_recoverable};
 pub use validate::{Issue, Report, Severity, repair, validate};

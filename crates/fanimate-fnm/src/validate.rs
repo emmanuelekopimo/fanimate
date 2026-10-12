@@ -12,7 +12,7 @@ use std::collections::HashSet;
 use std::fmt;
 
 use fanimate_core::anim::Animatable;
-use fanimate_core::{Channel, Document, Layer, LayerId, LayerKind};
+use fanimate_core::{Channel, Document, Key, Layer, LayerId, LayerKind};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Severity {
@@ -261,7 +261,9 @@ impl Checker {
                         let sloc = format!("{loc} > shape {i} \"{}\"", shape.name);
                         self.issue(Severity::Error, &sloc, "path has non-finite points".into(), false);
                     }
-                    self.widths(shape, &format!("{loc} > shape {i} \"{}\"", shape.name));
+                    let sloc = format!("{loc} > shape {i} \"{}\"", shape.name);
+                    self.widths(shape, &sloc);
+                    self.path_keys(shape, &sloc, end);
                 }
             }
             LayerKind::Group { children } => {
@@ -350,6 +352,33 @@ impl Checker {
         }
     }
 
+    /// Point keys: checked like a channel's keys, and each must be made of
+    /// the same commands as the shape's path to be drawn.
+    fn path_keys(&mut self, shape: &mut fanimate_core::Shape, loc: &str, end: i32) {
+        if shape.path_keys.is_empty() {
+            return;
+        }
+        let loc_keys = format!("{loc} > path_keys");
+        let mismatched = shape
+            .path_keys
+            .iter()
+            .filter(|k| !k.value.same_structure(&shape.path))
+            .count();
+        if mismatched > 0 {
+            self.issue(
+                Severity::Error,
+                &loc_keys,
+                format!("{mismatched} point keyframe(s) do not match the shape's points"),
+                true,
+            );
+            if self.repair {
+                let path = &shape.path;
+                shape.path_keys.retain(|k| k.value.same_structure(path));
+            }
+        }
+        self.keys(&mut shape.path_keys, |p| p.is_finite(), &loc_keys, end);
+    }
+
     fn channel<T: Animatable + Default>(&mut self, ch: &mut Channel<T>, loc: &str, name: &str, end: i32) {
         let loc = format!("{loc} > {name}");
 
@@ -359,69 +388,72 @@ impl Checker {
                 ch.base = T::default();
             }
         }
+        self.keys(&mut ch.keys, T::is_finite, &loc, end);
+    }
 
-        let negative = ch.keys.iter().filter(|k| k.frame < 0).count();
+    fn keys<T>(&mut self, keys: &mut Vec<Key<T>>, finite: impl Fn(&T) -> bool, loc: &str, end: i32) {
+        let negative = keys.iter().filter(|k| k.frame < 0).count();
         if negative > 0 {
             self.issue(
                 Severity::Error,
-                &loc,
+                loc,
                 format!("{negative} keyframe(s) on negative frames"),
                 true,
             );
             if self.repair {
-                ch.keys.retain(|k| k.frame >= 0);
+                keys.retain(|k| k.frame >= 0);
             }
         }
 
-        let bad = ch.keys.iter().filter(|k| !k.value.is_finite()).count();
+        let bad = keys.iter().filter(|k| !finite(&k.value)).count();
         if bad > 0 {
             self.issue(
                 Severity::Error,
-                &loc,
+                loc,
                 format!("{bad} keyframe(s) with non-finite values"),
                 true,
             );
             if self.repair {
-                ch.keys.retain(|k| k.value.is_finite());
+                keys.retain(|k| finite(&k.value));
             }
         }
 
-        if !ch.keys.is_sorted_by_key(|k| k.frame) {
-            self.issue(Severity::Error, &loc, "keyframes are out of order".into(), true);
+        if !keys.is_sorted_by_key(|k| k.frame) {
+            self.issue(Severity::Error, loc, "keyframes are out of order".into(), true);
             if self.repair {
                 // stable sort keeps the original order of same-frame keys,
                 // so the later key wins in the dedupe below
-                ch.keys.sort_by_key(|k| k.frame);
+                keys.sort_by_key(|k| k.frame);
             }
         }
 
-        let mut frames: Vec<i32> = ch.keys.iter().map(|k| k.frame).collect();
+        let mut frames: Vec<i32> = keys.iter().map(|k| k.frame).collect();
         frames.sort_unstable();
         let dupes = frames.windows(2).filter(|w| w[0] == w[1]).count();
         if dupes > 0 {
             self.issue(
                 Severity::Error,
-                &loc,
+                loc,
                 format!("{dupes} duplicate keyframe(s)"),
                 true,
             );
             if self.repair {
                 // keep the last key on each frame
-                let keys = std::mem::take(&mut ch.keys);
-                for k in keys {
-                    match ch.keys.last_mut() {
+                let taken = std::mem::take(keys);
+                for k in taken {
+                    match keys.last_mut() {
                         Some(last) if last.frame == k.frame => *last = k,
-                        _ => ch.keys.push(k),
+                        _ => keys.push(k),
                     }
                 }
             }
         }
 
-        let late = ch.keys.iter().filter(|k| k.frame > end).count();
+        let late = keys.iter().filter(|k| k.frame > end).count();
         if late > 0 {
             self.issue(
                 Severity::Warning,
-                &loc,
+                loc,
                 format!("{late} keyframe(s) after the last frame ({end})"),
                 false,
             );
@@ -552,6 +584,32 @@ mod tests {
         assert_eq!(widths_of(&doc), Some(vec![1.0, 0.0]));
         assert!(validate(&doc).is_clean());
         assert!(validate(&stroke_doc(vec![0.1, 1.0])).is_clean());
+    }
+
+    #[test]
+    fn point_keys_that_do_not_match_the_path_are_removed() {
+        use fanimate_core::{Path, Vec2};
+        let mut doc = stroke_doc(vec![1.0, 1.0]);
+        let LayerKind::Vector { shapes } = &mut doc.layers[0].kind else {
+            unreachable!()
+        };
+        let path = shapes[0].path.clone();
+        shapes[0].key_path(0, path.clone(), Interpolation::Linear);
+        shapes[0].key_path(5, Path::circle(Vec2::ZERO, 1.0), Interpolation::Linear);
+        shapes[0].path_keys.push(Key {
+            frame: 2,
+            value: path,
+            interp: Interpolation::Linear,
+        });
+        let report = validate(&doc);
+        assert_eq!(report.unresolved_errors().count(), 2, "{report}");
+        repair(&mut doc);
+        assert!(validate(&doc).is_clean(), "{}", validate(&doc));
+        let LayerKind::Vector { shapes } = &doc.layers[0].kind else {
+            unreachable!()
+        };
+        let frames: Vec<_> = shapes[0].path_keys.iter().map(|k| k.frame).collect();
+        assert_eq!(frames, [0, 2]);
     }
 
     #[test]

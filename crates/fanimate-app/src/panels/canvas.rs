@@ -41,6 +41,8 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
     let shape_preview = shape_tools(&ctx, &response, shell, &to_doc);
     click_tools(&response, shell, &to_doc);
     point_tools(&ctx, &response, shell, &to_doc);
+    add_point_tool(&response, shell, &to_doc);
+    pen_tool(&ctx, &response, shell, &to_doc);
     if response.hovered() || response.dragged() {
         ctx.set_cursor_icon(tool_cursor(&ctx, &response, shell.editor.tool));
     }
@@ -58,7 +60,14 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
         );
         let p = shell.palette.pasteboard;
         let pasteboard = Color::rgb(p.r() as f32 / 255.0, p.g() as f32 / 255.0, p.b() as f32 / 255.0);
-        let preview = shell.editor.stroke_preview().or(shape_preview);
+        let pointer = response
+            .hover_pos()
+            .map(|p| to_doc(shell.view.center, shell.view.zoom, p));
+        let preview = shell
+            .editor
+            .stroke_preview()
+            .or(shape_preview)
+            .or_else(|| shell.editor.pen_preview(pointer));
         let id = canvas.draw(
             rs,
             &shell.editor.doc,
@@ -83,6 +92,7 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
 
     overlays(ui, shell, rect, &to_screen);
     point_overlay(ui, shell, rect, &to_screen);
+    pen_overlay(ui, shell, rect, &to_screen);
     brush_cursor(ui, &response, shell);
 
     menus::context_menu(&response, |ui| {
@@ -91,6 +101,10 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
         menus::item(ui, shell, Action::ZoomIn);
         menus::item(ui, shell, Action::ZoomOut);
         ui.separator();
+        if shell.editor.tool.edits_points() {
+            menus::shape_items(ui, shell);
+            ui.separator();
+        }
         menus::layer_context(ui, shell);
     });
 }
@@ -108,6 +122,8 @@ fn tool_cursor(ctx: &egui::Context, response: &egui::Response, tool: Tool) -> eg
         Tool::Zoom if ctx.input(|i| i.modifiers.alt) => CursorIcon::ZoomOut,
         Tool::Zoom => CursorIcon::ZoomIn,
         Tool::Freehand
+        | Tool::AddPoint
+        | Tool::Pen
         | Tool::Eraser
         | Tool::Rectangle
         | Tool::Ellipse
@@ -421,8 +437,11 @@ fn point_tools(
     to_doc: &impl Fn(Vec2, f32, Pos2) -> Vec2,
 ) {
     let tool = shell.editor.tool;
-    if !tool.edits_points() {
-        shell.ui.point_gesture = None;
+    if !matches!(tool, Tool::SelectPoints | Tool::TranslatePoints) {
+        // Add Point keeps its own drag in the same place
+        if tool != Tool::AddPoint {
+            shell.ui.point_gesture = None;
+        }
         return;
     }
     let (center, zoom) = (shell.view.center, shell.view.zoom);
@@ -501,6 +520,107 @@ fn point_tools(
 
 /// How close, in screen pixels, a click must be to a point to pick it.
 const POINT_SLOP_PX: f32 = 6.0;
+
+/// Add Point: click a line to add a point on it; drag from an open end to
+/// extend the path, or from empty space to start a line, the new point
+/// following the pointer.
+fn add_point_tool(response: &egui::Response, shell: &mut Shell, to_doc: &impl Fn(Vec2, f32, Pos2) -> Vec2) {
+    if shell.editor.tool != Tool::AddPoint {
+        return;
+    }
+    let (center, zoom) = (shell.view.center, shell.view.zoom);
+    let doc = |p: Pos2| to_doc(center, zoom, p);
+    let slop = POINT_SLOP_PX / zoom;
+    if response.clicked_by(egui::PointerButton::Primary)
+        && let Some(pos) = response.interact_pointer_pos()
+        && !shell.editor.insert_point_at(doc(pos), slop)
+    {
+        shell.editor.set_status(
+            fanimate_editor::StatusKind::Info,
+            "Click on a line, or drag to draw one",
+        );
+    }
+    if response.drag_started_by(egui::PointerButton::Primary)
+        && let Some(start) = response.ctx.input(|i| i.pointer.press_origin())
+        && shell.editor.begin_add_point(doc(start), slop)
+    {
+        shell.ui.point_gesture = Some(PointGesture::Move(doc(start)));
+    }
+    if let Some(PointGesture::Move(last)) = shell.ui.point_gesture
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        let now = doc(pos);
+        shell.editor.drag_points(now - last);
+        shell.ui.point_gesture = Some(PointGesture::Move(now));
+    }
+    if response.drag_stopped() || (shell.editor.is_adding_point() && !response.dragged()) {
+        shell.editor.end_add_point(slop);
+        shell.ui.point_gesture = None;
+    }
+}
+
+/// The Pen: press to add a point, drag before releasing to make it smooth.
+fn pen_tool(
+    ctx: &egui::Context,
+    response: &egui::Response,
+    shell: &mut Shell,
+    to_doc: &impl Fn(Vec2, f32, Pos2) -> Vec2,
+) {
+    if shell.editor.tool != Tool::Pen {
+        return;
+    }
+    let (center, zoom) = (shell.view.center, shell.view.zoom);
+    let doc = |p: Pos2| to_doc(center, zoom, p);
+    let slop = POINT_SLOP_PX / zoom;
+    let (pressed, released, origin) = ctx.input(|i| {
+        (
+            i.pointer.primary_pressed(),
+            i.pointer.primary_released(),
+            i.pointer.press_origin(),
+        )
+    });
+    // react to the press itself, not the click, so a drag shapes the curve
+    if pressed
+        && response.hovered()
+        && let Some(at) = origin
+    {
+        shell.ui.pen_down = shell.editor.pen_down(doc(at), slop);
+    }
+    if shell.ui.pen_down {
+        if response.dragged_by(egui::PointerButton::Primary)
+            && let Some(pos) = response.interact_pointer_pos()
+        {
+            shell.editor.pen_drag(doc(pos));
+        }
+        if released {
+            shell.ui.pen_down = false;
+            shell.editor.pen_up();
+        }
+    }
+}
+
+/// The Pen path's points and the handles of smooth ones.
+fn pen_overlay(ui: &egui::Ui, shell: &Shell, rect: Rect, to_screen: &impl Fn(Vec2, f32, Vec2) -> Pos2) {
+    if shell.editor.tool != Tool::Pen {
+        return;
+    }
+    let painter = ui.painter_at(rect);
+    let (c, z, p) = (shell.view.center, shell.view.zoom, shell.palette);
+    for (i, (at, handle)) in shell.editor.pen_points().into_iter().enumerate() {
+        let s = to_screen(c, z, at);
+        if handle != Vec2::ZERO {
+            for h in [at + handle, at - handle] {
+                let hs = to_screen(c, z, h);
+                painter.line_segment([s, hs], Stroke::new(1.0, p.accent));
+                painter.circle_filled(hs, 3.0, p.accent);
+            }
+        }
+        let r = Rect::from_center_size(s, egui::vec2(7.0, 7.0));
+        // the first point is filled: clicking it closes the shape
+        painter.rect_filled(r, 1.0, if i == 0 { p.accent } else { p.panel });
+        painter.rect_stroke(r, 1.0, Stroke::new(1.0, p.accent), egui::StrokeKind::Inside);
+    }
+}
 
 /// The point layer's points as small squares, filled when selected, and
 /// the selection box being dragged.

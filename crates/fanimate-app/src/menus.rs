@@ -40,6 +40,12 @@ pub fn menu_button(
 /// A menu item that queues `action`, shows its shortcut from the active
 /// keymap, and is greyed out when it cannot run.
 pub fn item(ui: &mut egui::Ui, shell: &mut Shell, action: Action) {
+    item_checked(ui, shell, action, false);
+}
+
+/// An [`item`] shown as chosen, for options such as the interpolation of
+/// the current key.
+pub fn item_checked(ui: &mut egui::Ui, shell: &mut Shell, action: Action, checked: bool) {
     let label = match action {
         Action::Undo => shell
             .editor
@@ -59,6 +65,7 @@ pub fn item(ui: &mut egui::Ui, shell: &mut Shell, action: Action) {
     // a long label keeps a clear 24 px from its keys
     let button = egui::Button::new(label)
         .shortcut_text(shell.keymap.shortcut_text(action))
+        .selected(checked)
         .gap(12.0);
     if ui.add_enabled(shell.editor.can_run(action), button).clicked() {
         shell.pending.push(action);
@@ -87,7 +94,7 @@ pub fn file(ui: &mut egui::Ui, shell: &mut Shell) {
 }
 
 pub fn edit(ui: &mut egui::Ui, shell: &mut Shell) {
-    items(ui, shell, &[Action::Undo, Action::Redo]);
+    items(ui, shell, &[Action::Undo, Action::Redo, Action::UndoLayer]);
     ui.separator();
     items(
         ui,
@@ -103,8 +110,18 @@ pub fn edit(ui: &mut egui::Ui, shell: &mut Shell) {
     ui.separator();
     items(ui, shell, &[Action::SelectAll, Action::SelectNone]);
     ui.separator();
+    ui.menu_button("Combine Shapes", |ui| {
+        ui.set_min_width(MENU_MIN_WIDTH);
+        shape_items(ui, shell);
+    });
+    ui.separator();
     keymap_menu(ui, shell);
     item(ui, shell, Action::Preferences);
+}
+
+/// Commands on the shapes with selected points.
+pub fn shape_items(ui: &mut egui::Ui, shell: &mut Shell) {
+    items(ui, shell, &[Action::Union, Action::Subtract, Action::Intersect]);
 }
 
 pub fn keymap_menu(ui: &mut egui::Ui, shell: &mut Shell) {
@@ -170,6 +187,21 @@ pub fn animation(ui: &mut egui::Ui, shell: &mut Shell) {
     );
     ui.separator();
     items(ui, shell, &[Action::AddKey, Action::DeleteKey]);
+    interpolation_items(ui, shell);
+}
+
+/// The interpolation of the keys on the current frame, one item each.
+pub fn interpolation_items(ui: &mut egui::Ui, shell: &mut Shell) {
+    ui.separator();
+    let current = shell.editor.key_interpolation().flatten();
+    for interp in fanimate_core::Interpolation::ALL {
+        item_checked(
+            ui,
+            shell,
+            Action::SetInterpolation(interp),
+            current == Some(interp),
+        );
+    }
 }
 
 pub fn view(ui: &mut egui::Ui, shell: &mut Shell) {

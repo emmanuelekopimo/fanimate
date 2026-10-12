@@ -10,6 +10,7 @@
 
 pub mod anim;
 pub mod bones;
+pub mod boolean;
 pub mod brush;
 pub mod color;
 pub mod eval;
@@ -21,6 +22,7 @@ pub mod transform;
 
 pub use anim::{Channel, Frame, Interpolation, Key};
 pub use bones::{Bone, Skeleton};
+pub use boolean::BoolOp;
 pub use brush::{BrushOptions, BrushSample, Stabiliser};
 pub use color::Color;
 pub use eval::{DrawItem, evaluate};

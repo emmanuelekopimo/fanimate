@@ -76,7 +76,7 @@ impl Editor {
     /// Where new artwork goes: the selected vector layer (`Some`), or a new
     /// layer (`None`) when anything else or nothing is selected. Fails, with
     /// a status message, when the selection is hidden.
-    fn drawing_target(&mut self) -> Result<Option<LayerId>, ()> {
+    pub(super) fn drawing_target(&mut self) -> Result<Option<LayerId>, ()> {
         match self.primary().and_then(|id| self.doc.find(id)) {
             Some(layer) if !self.shown(layer.id) => {
                 let msg = format!("\"{}\" is hidden. Show it to draw on it.", layer.name);
@@ -187,11 +187,12 @@ impl Editor {
         let scale = inv.matrix2.determinant().abs().sqrt();
         let radius = self.draw.eraser / 2.0 * scale;
         let tolerance = BRUSH_TOLERANCE_PX / zoom * scale;
-        // shapes bound to bones are drawn posed, not where they are stored
+        // shapes bound to bones are drawn posed, not where they are stored,
+        // and cutting a shape with point keys would lose its animation
         let changes: Vec<(usize, Vec<Shape>)> = shapes
             .iter()
             .enumerate()
-            .filter(|(_, s)| s.bone.is_none())
+            .filter(|(_, s)| s.bone.is_none() && !s.is_animated())
             .filter_map(|(i, s)| brush::erase(s, &eraser, radius, tolerance).map(|left| (i, left)))
             .collect();
         if let Some(erase) = &mut self.erase {
@@ -299,8 +300,8 @@ impl Editor {
     /// Add a shape given in document space to `target`, or to a new vector
     /// layer: inside the selected group or bone layer, else above the
     /// selection. The shape's name is a word ("Stroke"), numbered here.
-    /// One undo step.
-    fn add_shape(&mut self, target: Option<LayerId>, mut shape: Shape) {
+    /// One undo step. Returns the shape's index in its layer.
+    pub(super) fn add_shape(&mut self, target: Option<LayerId>, mut shape: Shape) -> Option<usize> {
         self.checkpoint("Draw");
         let id = match target {
             Some(id) => id,
@@ -314,7 +315,9 @@ impl Editor {
             let n = shapes.iter().filter(|s| s.name.starts_with(&prefix)).count() + 1;
             shape.name = format!("{prefix}{n}");
             shapes.push(shape);
+            return Some(shapes.len() - 1);
         }
+        None
     }
 
     /// A new, empty vector layer for drawing on, selected.
@@ -345,11 +348,7 @@ impl Editor {
             if !item.shape.contains(inv.transform_point2(p), local_tolerance) {
                 return None;
             }
-            let LayerKind::Vector { shapes } = &self.doc.find(item.layer)?.kind else {
-                return None;
-            };
-            let index = shapes.iter().position(|s| std::ptr::eq(s, item.shape))?;
-            Some((item.layer, index))
+            Some((item.layer, item.index))
         })
     }
 
@@ -636,9 +635,9 @@ mod tests {
         assert_eq!(s[1].style.stroke.unwrap().color, red);
         assert!(s[1].style.fill.is_none());
         // already that colour: no change, no undo step
-        let steps = ed.history.undo_label();
+        let steps = ed.history.undo_label().map(str::to_owned);
         assert!(!ed.paint_at(Vec2::splat(50.0), 1.0));
-        assert_eq!(ed.history.undo_label(), steps);
+        assert_eq!(ed.history.undo_label().map(str::to_owned), steps);
         // undo takes back one fill
         ed.run(crate::Action::Undo);
         assert_eq!(shapes(&ed, id)[1].style.stroke.unwrap().color, Color::BLACK);
@@ -652,10 +651,10 @@ mod tests {
         ed.draw.fill = Some(blue);
         ed.add_drag_shape(Tool::Rectangle, Vec2::ZERO, Vec2::splat(100.0), false, false, 1.0);
         ed.draw.fill = Some(Color::WHITE);
-        let steps = ed.history.undo_label();
+        let steps = ed.history.undo_label().map(str::to_owned);
         assert!(ed.pick_style_at(Vec2::splat(50.0), 0.0));
         assert_eq!(ed.draw.fill, Some(blue));
-        assert_eq!(ed.history.undo_label(), steps);
+        assert_eq!(ed.history.undo_label().map(str::to_owned), steps);
     }
 
     #[test]
@@ -664,7 +663,7 @@ mod tests {
         draw_line(&mut ed, Vec2::new(0.0, 0.0), Vec2::new(200.0, 0.0));
         draw_line(&mut ed, Vec2::new(0.0, 100.0), Vec2::new(200.0, 100.0));
         let before = shapes(&ed, id);
-        let steps_before = ed.history.undo_label();
+        let steps_before = ed.history.undo_label().map(str::to_owned);
         // a vertical drag across both lines, in several moves
         assert!(ed.begin_erase(Vec2::new(100.0, -20.0), 1.0));
         for y in [20.0, 60.0, 120.0] {
@@ -675,20 +674,20 @@ mod tests {
         assert_eq!(shapes(&ed, id).len(), 4);
         ed.run(crate::Action::Undo);
         assert_eq!(shapes(&ed, id), before);
-        assert_eq!(ed.history.undo_label(), steps_before);
+        assert_eq!(ed.history.undo_label().map(str::to_owned), steps_before);
     }
 
     #[test]
     fn erasing_nothing_records_nothing() {
         let (mut ed, _) = editor();
         draw_line(&mut ed, Vec2::ZERO, Vec2::new(200.0, 0.0));
-        let steps = ed.history.undo_label();
-        let dirty_before = ed.history.redo_label();
+        let steps = ed.history.undo_label().map(str::to_owned);
+        let dirty_before = ed.history.redo_label().map(str::to_owned);
         assert!(ed.begin_erase(Vec2::new(0.0, 300.0), 1.0));
         ed.erase_to(Vec2::new(200.0, 300.0));
         ed.end_erase();
-        assert_eq!(ed.history.undo_label(), steps);
-        assert_eq!(ed.history.redo_label(), dirty_before);
+        assert_eq!(ed.history.undo_label().map(str::to_owned), steps);
+        assert_eq!(ed.history.redo_label().map(str::to_owned), dirty_before);
     }
 
     #[test]

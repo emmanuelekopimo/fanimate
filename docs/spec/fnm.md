@@ -1,6 +1,6 @@
 # The `.fnm` project format
 
-**Current version: 1. Status: draft.** The format may still change before Fanimate 1.0, but every change that older readers would misread bumps the version, and Fanimate always opens files written by earlier versions. See [Version history](#version-history).
+**Current version: 2. Status: draft.** The format may still change before Fanimate 1.0, but every change that older readers would misread bumps the version, and Fanimate always opens files written by earlier versions. See [Version history](#version-history).
 
 The reference implementation is the [`fanimate-fnm`](../../crates/fanimate-fnm/) crate.
 
@@ -35,7 +35,7 @@ Identifies the folder as a Fanimate project.
 ```json
 {
   "format": "fnm",
-  "version": 1,
+  "version": 2,
   "generator": "fanimate 0.0.6"
 }
 ```
@@ -131,6 +131,7 @@ A skeleton. Shapes on vector layers anywhere inside `children` can bind to its b
 | `style.stroke` | object | Optional. `color` and `width` (document units). |
 | `bone` | integer | Optional. Index of the bone this shape follows, in the nearest enclosing bone layer. |
 | `widths` | array of numbers | Optional (version 1). The stroke's [width profile](#width-profiles). |
+| `path_keys` | array of keys | Optional (version 2). [Point keyframes](#point-keyframes): the path at chosen frames. |
 
 A bound shape's points are stored in the **rest pose**. At each frame the shape moves rigidly with its bone: from the bone's rest transform to its current transform. Weighted deformation (one point following several bones) will be added in a later version.
 
@@ -152,6 +153,27 @@ Brush strokes vary in width along their length, from pen pressure and tapered en
 - Values are finite and not negative. A profile whose length does not match the path is ignored: the stroke is drawn at `style.stroke.width` everywhere.
 - A stroke with a profile has round caps and round joins. Without one, caps are flat (butt) and joins are mitred.
 - `widths` has no effect on fills, or on a shape without a stroke.
+
+### Point keyframes
+
+A drawing can change shape over time. `path_keys` holds the shape's path at chosen frames, as [channel](#channels) keys whose `value` is a [path](#paths):
+
+```json
+{
+  "name": "Blob",
+  "path": [{"M": [0.0, 0.0]}, {"L": [10.0, 0.0]}, {"L": [5.0, 8.0]}, "Z"],
+  "style": {"fill": "#5EEAD4"},
+  "path_keys": [
+    {"frame": 0, "value": [{"M": [0.0, 0.0]}, {"L": [10.0, 0.0]}, {"L": [5.0, 8.0]}, "Z"]},
+    {"frame": 12, "value": [{"M": [0.0, 0.0]}, {"L": [10.0, 0.0]}, {"L": [5.0, 14.0]}, "Z"], "interp": "linear"}
+  ]
+}
+```
+
+- Keys follow the channel rules: sorted by `frame`, at most one per frame, no negative frames, `interp` saying how the path moves on to the next key.
+- **Every key has the same commands as `path`**, in the same order; only the points differ. The path is then interpolated point by point, control points included. A key whose commands differ is invalid.
+- `path` is the shape's path when it has no keys, and the one point edits change while it has none. With keys, `path` is kept but the keys decide what is drawn, as a channel's `base` does.
+- `widths` applies to every key alike. A shape bound to a bone stores its keys in the rest pose, like its path.
 
 ## Paths
 
@@ -236,7 +258,7 @@ If step 3 fails, put the old copy back. At no point is the only copy of the proj
 
 ## Crash recovery copies
 
-While a project is open, Fanimate keeps a copy of it in its data folder, updated after every action, so a crash loses at most the action being written. The copy is an ordinary `.fnm` project folder (`project.fnm`) next to a `session.json` saying where the project is saved and whether it had unsaved changes. Each file in the copy is replaced atomically. The copy is deleted when Fanimate closes normally. Nothing else in this specification depends on it.
+While a project is open, Fanimate keeps a copy of it in its data folder, updated after every action, so a crash loses at most the action being written. The copy is an ordinary `.fnm` project folder (`project.fnm`) next to a `session.json` saying where the project is saved and whether it had unsaved changes, and a `history` folder with the undo history: an `index.json` listing each state's layers, and one file per distinct top-level layer state in `history/layers/`, so a layer unchanged between steps is stored once. Each file in the copy is replaced atomically. The copy is deleted when Fanimate closes normally. The history format is internal to Fanimate and may change between versions; a history that cannot be read is left out and the project recovered without it. Nothing else in this specification depends on it.
 
 ## Validation
 
@@ -253,6 +275,8 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | Bone parent not before the bone | Error | Make the bone a root |
 | Non-positive `fps`, `width` or `height`; bad frame range | Error | Reset to defaults |
 | Width profile whose length does not match the path's on-curve points | Error | Remove the profile |
+| Point keyframe whose commands differ from the shape's path | Error | Remove the key |
+| Point keyframes on negative frames, out of order, duplicated or not finite | Error | As for channel keys |
 | Negative or non-finite value in a width profile | Error | Non-finite becomes 1, negative becomes 0 |
 | Shape bound to a bone that does not exist, or outside any bone layer | Warning | Unbind the shape |
 | Keyframe after the `end` frame | Warning | None; the key is kept |
@@ -270,4 +294,5 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | Version | First written by | Changes | Converting older files |
 |---|---|---|---|
 | 0 | Fanimate 0.0.1 | First version: layers, shapes, bones, channels | |
-| 1 | Fanimate 0.0.6 | Shapes may have a stroke width profile (`widths`), written by the brush | Version 0 files need no conversion. A version 0 reader would ignore `widths` and draw brush strokes at one width, so the version was bumped. |
+| 1 | Development builds after Fanimate 0.0.5 (never released) | Shapes may have a stroke width profile (`widths`), written by the brush | Version 0 files need no conversion. A version 0 reader would ignore `widths` and draw brush strokes at one width, so the version was bumped. |
+| 2 | Fanimate 0.0.6 | Shapes may have point keyframes (`path_keys`) | Older files need no conversion. An older reader would ignore `path_keys` and draw animated drawings without their animation, so the version was bumped. |
