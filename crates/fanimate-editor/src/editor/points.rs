@@ -37,7 +37,7 @@ impl Editor {
                 let Some(s) = self.point_shape(shape) else {
                     return Vec::new();
                 };
-                let pts = s.path.on_curve_points();
+                let pts = s.path_at(self.current_frame() as f32).on_curve_points();
                 let mut seen: Vec<Vec2> = Vec::new();
                 pts.iter()
                     .enumerate()
@@ -117,6 +117,7 @@ impl Editor {
     /// [`begin_point_drag`](Self::begin_point_drag) once first.
     pub fn drag_points(&mut self, delta: Vec2) {
         let transforms: BTreeMap<(LayerId, usize), Affine2> = self.shape_transforms().into_iter().collect();
+        let frame = self.current_frame();
         for (shape, points) in self.points_by_shape() {
             // the drag in the shape's own space
             let Some(t) = transforms.get(&shape) else { continue };
@@ -125,7 +126,10 @@ impl Editor {
                 continue;
             }
             if let Some(s) = self.point_shape_mut(shape) {
-                s.path.move_points(&points, local);
+                // auto-key: a shape with point keys gets a key on this frame
+                let mut path = s.path_at(frame as f32).into_owned();
+                path.move_points(&points, local);
+                s.set_path_at(frame, path);
             }
         }
         self.dirty = true;
@@ -184,32 +188,29 @@ impl Editor {
 
     /// Where each shape of the point layer is drawn at the current frame:
     /// shape-space to document-space transforms.
-    fn shape_transforms(&self) -> Vec<((LayerId, usize), Affine2)> {
+    pub(super) fn shape_transforms(&self) -> Vec<((LayerId, usize), Affine2)> {
         let Some(layer) = self.point_layer() else {
             return Vec::new();
         };
-        let Some(LayerKind::Vector { shapes }) = self.doc.find(layer).map(|l| &l.kind) else {
-            return Vec::new();
-        };
         // hidden layers are not evaluated, so their points are not shown
-        evaluate(&self.doc, self.frame)
+        evaluate(&self.doc, self.current_frame() as f32)
             .into_iter()
             .filter(|item| item.layer == layer)
-            .filter_map(|item| {
-                let index = shapes.iter().position(|s| std::ptr::eq(s, item.shape))?;
-                Some(((layer, index), item.transform))
-            })
+            .map(|item| ((layer, item.index), item.transform))
             .collect()
     }
 
-    fn point_shape(&self, (layer, index): (LayerId, usize)) -> Option<&fanimate_core::Shape> {
+    pub(super) fn point_shape(&self, (layer, index): (LayerId, usize)) -> Option<&fanimate_core::Shape> {
         match &self.doc.find(layer)?.kind {
             LayerKind::Vector { shapes } => shapes.get(index),
             _ => None,
         }
     }
 
-    fn point_shape_mut(&mut self, (layer, index): (LayerId, usize)) -> Option<&mut fanimate_core::Shape> {
+    pub(super) fn point_shape_mut(
+        &mut self,
+        (layer, index): (LayerId, usize),
+    ) -> Option<&mut fanimate_core::Shape> {
         match &mut self.doc.find_mut(layer)?.kind {
             LayerKind::Vector { shapes } => shapes.get_mut(index),
             _ => None,
@@ -321,6 +322,27 @@ mod tests {
         ed.run(Action::SelectNone);
         assert!(ed.points.is_empty());
         assert_eq!(ed.selection, [id]);
+    }
+
+    #[test]
+    fn moving_points_on_an_animated_layer_sets_point_keys() {
+        let (mut ed, id) = editor();
+        ed.run(Action::AddKey);
+        ed.go_to(10);
+        let r = ed.point_at(Vec2::new(110.0, 0.0), 1.0).unwrap();
+        ed.select_point(r, SelectMode::Replace);
+        assert!(ed.begin_point_drag());
+        ed.drag_points(Vec2::new(0.0, 20.0));
+        let s = shape(&ed, id).unwrap();
+        assert_eq!(s.path_keys.len(), 2);
+        // the shape's own path, and so frame 0, is unchanged
+        assert_eq!(s.path.on_curve_points()[1], Vec2::new(100.0, 0.0));
+        assert_eq!(s.path_at(10.0).on_curve_points()[1], Vec2::new(100.0, 20.0));
+        // points are shown where they are on the frame
+        assert!(ed.point_at(Vec2::new(110.0, 20.0), 1.0).is_some());
+        ed.go_to(5);
+        assert!(ed.point_at(Vec2::new(110.0, 10.0), 1.0).is_some());
+        assert_eq!(ed.key_frames(id), [0, 10]);
     }
 
     #[test]

@@ -4,6 +4,7 @@ use glam::{Affine2, Vec2};
 use serde::{Deserialize, Serialize};
 
 use crate::Color;
+use crate::anim::Key;
 
 /// One path command. Points are in the owning layer's space.
 ///
@@ -266,6 +267,12 @@ pub struct Shape {
     /// Without it the stroke has the same width everywhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub widths: Option<Vec<f32>>,
+    /// Point keyframes: the path at chosen frames, so a drawing can change
+    /// shape over time. Like a channel's keys, with `path` as the value
+    /// when there are none. Every key has the same commands as `path`, only
+    /// the points differ, so they interpolate point by point.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_keys: Vec<Key<Path>>,
 }
 
 impl Shape {
@@ -276,6 +283,7 @@ impl Shape {
             style,
             bone: None,
             widths: None,
+            path_keys: Vec::new(),
         }
     }
 
@@ -283,6 +291,9 @@ impl Shape {
     /// scale, as the renderer does.
     pub fn transform(&mut self, t: Affine2) {
         self.path.transform(t);
+        for key in &mut self.path_keys {
+            key.value.transform(t);
+        }
         if let Some(stroke) = &mut self.style.stroke {
             stroke.width *= t.matrix2.determinant().abs().sqrt();
         }

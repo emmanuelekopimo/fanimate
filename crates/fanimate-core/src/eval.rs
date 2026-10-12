@@ -1,15 +1,21 @@
 //! Frame evaluation: turn a document at a frame into a flat draw list.
 
+use std::borrow::Cow;
+
 use glam::Affine2;
 
 use crate::path::Shape;
 use crate::scene::{Document, Layer, LayerId, LayerKind};
 
 /// One shape to draw, with everything resolved for the frame.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct DrawItem<'a> {
     pub layer: LayerId,
-    pub shape: &'a Shape,
+    /// The shape's index in its layer.
+    pub index: usize,
+    /// The shape as drawn on this frame: borrowed from the document, or,
+    /// for a shape with point keys, a copy with the path for the frame.
+    pub shape: Cow<'a, Shape>,
     /// Shape space to document space.
     pub transform: Affine2,
     /// Combined opacity of the shape's layer and all its ancestors.
@@ -77,7 +83,7 @@ impl Evaluator {
 
             match &layer.kind {
                 LayerKind::Vector { shapes } => {
-                    for shape in shapes {
+                    for (index, shape) in shapes.iter().enumerate() {
                         let transform = match (rig, shape.bone) {
                             (Some((r, rel)), Some(b)) => match self.skins[r.depth].get(b) {
                                 Some(skin) => r.world * *skin * rel,
@@ -87,7 +93,8 @@ impl Evaluator {
                         };
                         out.push(DrawItem {
                             layer: layer.id,
-                            shape,
+                            index,
+                            shape: at_frame(shape, frame),
                             transform,
                             opacity,
                         });
@@ -118,6 +125,25 @@ impl Evaluator {
                 }
             }
         }
+    }
+}
+
+/// `shape` as it is on `frame`. Only shapes with point keys are copied, so
+/// playing unanimated artwork allocates nothing.
+fn at_frame(shape: &Shape, frame: f32) -> Cow<'_, Shape> {
+    if !shape.is_animated() {
+        return Cow::Borrowed(shape);
+    }
+    match shape.path_at(frame) {
+        Cow::Borrowed(p) if std::ptr::eq(p, &shape.path) => Cow::Borrowed(shape),
+        path => Cow::Owned(Shape {
+            name: shape.name.clone(),
+            path: path.into_owned(),
+            style: shape.style,
+            bone: shape.bone,
+            widths: shape.widths.clone(),
+            path_keys: Vec::new(),
+        }),
     }
 }
 
@@ -204,6 +230,23 @@ mod tests {
         assert!(at(0.0).abs_diff_eq(Vec2::new(60.0, 50.0), 1e-4));
         // quarter turn about the joint at (50, 50) moves the point to (50, 60)
         assert!(at(10.0).abs_diff_eq(Vec2::new(50.0, 60.0), 1e-4));
+    }
+
+    #[test]
+    fn shapes_with_point_keys_are_drawn_as_on_the_frame() {
+        let mut doc = Document::new("t", 100.0, 100.0, 24.0);
+        let mut shape = square();
+        let mut moved = shape.path.clone();
+        moved.transform(Affine2::from_translation(Vec2::new(10.0, 0.0)));
+        shape.key_path(0, shape.path.clone(), Interpolation::Linear);
+        shape.key_path(10, moved, Interpolation::Linear);
+        let layer = doc.new_layer("v", LayerKind::vector(vec![square(), shape]));
+        doc.layers.push(layer);
+        let items = evaluate(&doc, 5.0);
+        assert!(matches!(items[0].shape, Cow::Borrowed(_)));
+        assert_eq!(items[1].index, 1);
+        assert_eq!(items[1].shape.path.on_curve_points()[0], Vec2::new(5.0, 0.0));
+        assert!(!items[1].shape.is_animated());
     }
 
     #[test]

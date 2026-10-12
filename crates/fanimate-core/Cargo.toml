@@ -10,6 +10,7 @@ authors.workspace = true
 
 [dependencies]
 glam.workspace = true
+i_overlay.workspace = true
 serde.workspace = true
 
 [dev-dependencies]

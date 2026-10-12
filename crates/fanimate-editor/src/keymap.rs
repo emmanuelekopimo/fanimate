@@ -184,6 +184,7 @@ const FANIMATE: &[(&str, Action)] = &[
     ("Ctrl+Z", Undo),
     ("Ctrl+Y", Redo),
     ("Ctrl+Shift+Z", Redo),
+    ("Ctrl+Alt+Z", UndoLayer),
     ("Ctrl+X", Cut),
     ("Ctrl+C", Copy),
     ("Ctrl+V", Paste),
@@ -194,6 +195,7 @@ const FANIMATE: &[(&str, Action)] = &[
     ("Escape", SelectNone),
     ("Ctrl+Shift+A", SelectNone),
     ("F2", Rename),
+    ("Enter", FinishPath),
     ("Ctrl+Comma", Preferences),
     ("Ctrl+Shift+P", CommandPalette),
     ("F1", CommandPalette),
@@ -225,7 +227,8 @@ const FANIMATE: &[(&str, Action)] = &[
     ("V", Tool(Tool::TransformLayer)),
     ("A", Tool(Tool::SelectPoints)),
     ("Q", Tool(Tool::TranslatePoints)),
-    ("P", Tool(Tool::AddPoint)),
+    ("P", Tool(Tool::Pen)),
+    ("Shift+P", Tool(Tool::AddPoint)),
     ("B", Tool(Tool::Freehand)),
     ("R", Tool(Tool::Rectangle)),
     ("O", Tool(Tool::Ellipse)),
@@ -249,6 +252,8 @@ const MOHO: &[(&str, Action)] = &[
     // Edit (Moho: redo is Ctrl+Shift+Z only; Ctrl+Y is its tracing image)
     ("Ctrl+Z", Undo),
     ("Ctrl+Shift+Z", Redo),
+    // not in Moho, but unused there
+    ("Ctrl+Alt+Z", UndoLayer),
     ("Ctrl+X", Cut),
     ("Ctrl+C", Copy),
     ("Ctrl+V", Paste),
@@ -259,6 +264,7 @@ const MOHO: &[(&str, Action)] = &[
     // not in Moho, but unused there, so safe to add
     ("F1", CommandPalette),
     ("F2", Rename),
+    ("Enter", FinishPath),
     // Animation
     ("Space", PlayPause),
     ("Right", NextFrame),
@@ -336,7 +342,8 @@ mod tests {
         let map = Keymap::new(KeymapKind::Fanimate);
         assert_eq!(map.lookup(chord("Z")), Some(Tool(Tool::Zoom)));
         assert_eq!(map.lookup(chord("Ctrl+Z")), Some(Undo));
-        assert_eq!(map.lookup(chord("Ctrl+Alt+Z")), None);
+        assert_eq!(map.lookup(chord("Ctrl+Alt+Z")), Some(UndoLayer));
+        assert_eq!(map.lookup(chord("Ctrl+Alt+Shift+Z")), None);
     }
 
     #[test]

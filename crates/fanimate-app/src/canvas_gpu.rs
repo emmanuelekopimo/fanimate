@@ -71,7 +71,8 @@ impl CanvasGpu {
         if let Some(shape) = extra {
             items.push(DrawItem {
                 layer: LayerId(0),
-                shape,
+                index: 0,
+                shape: std::borrow::Cow::Borrowed(shape),
                 transform: Affine2::IDENTITY,
                 opacity: 1.0,
             });

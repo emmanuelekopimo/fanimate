@@ -9,7 +9,8 @@
 //! └── 1234-1739372400123/      one per session
 //!     ├── lock                 held while the session is running
 //!     ├── session.json         what the project is and where it is saved
-//!     └── project.fnm/         the project as of the last action
+//!     ├── project.fnm/         the project as of the last action
+//!     └── history/             its undo history (see `crate::history`)
 //! ```
 //!
 //! Writes happen on a background thread, so the interface never waits for
@@ -29,12 +30,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use fanimate_core::{Document, LayerId};
 use serde::{Deserialize, Serialize};
 
+use crate::history::{self, HistoryRecord, HistoryWriter};
 use crate::io::{document_file, io_err, layer_file, manifest, write_json_atomic};
 use crate::{Report, Result};
 
 const LOCK: &str = "lock";
 const SESSION: &str = "session.json";
 const PROJECT: &str = "project.fnm";
+const HISTORY: &str = "history";
 
 /// What a recovery folder holds, written beside the project.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -49,8 +52,14 @@ pub struct SessionInfo {
     pub updated: u64,
 }
 
+struct Snapshot {
+    doc: Box<Document>,
+    info: SessionInfo,
+    history: Option<HistoryRecord>,
+}
+
 enum Message {
-    Record(Box<Document>, SessionInfo),
+    Record(Snapshot),
     /// Reply once everything before this has been written.
     Flush(Sender<()>),
 }
@@ -102,9 +111,9 @@ impl Journal {
         &self.dir
     }
 
-    /// Record the project as it is now. Returns at once; the writing
-    /// happens in the background.
-    pub fn record(&self, doc: &Document, path: Option<&Path>, unsaved: bool) {
+    /// Record the project as it is now, with its undo history if given.
+    /// Returns at once; the writing happens in the background.
+    pub fn record(&self, doc: &Document, path: Option<&Path>, unsaved: bool, history: Option<HistoryRecord>) {
         let info = SessionInfo {
             name: doc.name.clone(),
             path: path.map(Path::to_path_buf),
@@ -115,7 +124,11 @@ impl Journal {
                 .as_secs(),
         };
         if let Some(tx) = &self.tx {
-            let _ = tx.send(Message::Record(Box::new(doc.clone()), info));
+            let _ = tx.send(Message::Record(Snapshot {
+                doc: Box::new(doc.clone()),
+                info,
+                history: history.filter(HistoryRecord::is_consistent),
+            }));
         }
     }
 
@@ -162,6 +175,7 @@ impl Drop for Journal {
 struct Writer {
     project: PathBuf,
     session: PathBuf,
+    history: HistoryWriter,
     last: Option<Document>,
 }
 
@@ -170,6 +184,7 @@ impl Writer {
         Self {
             project: dir.join(PROJECT),
             session: dir.join(SESSION),
+            history: HistoryWriter::new(dir.join(HISTORY)),
             last: None,
         }
     }
@@ -177,7 +192,7 @@ impl Writer {
     fn run(mut self, rx: Receiver<Message>, error: &Mutex<Option<String>>) {
         // only the newest state matters: when several arrive before the
         // disk catches up, the older ones are skipped
-        let mut pending: Option<(Box<Document>, SessionInfo)> = None;
+        let mut pending: Option<Snapshot> = None;
         loop {
             let msg = if pending.is_some() {
                 rx.try_recv().ok()
@@ -188,7 +203,7 @@ impl Writer {
                 }
             };
             match msg {
-                Some(Message::Record(doc, info)) => pending = Some((doc, info)),
+                Some(Message::Record(snapshot)) => pending = Some(snapshot),
                 Some(Message::Flush(done)) => {
                     self.write_pending(&mut pending, error);
                     let _ = done.send(());
@@ -198,13 +213,14 @@ impl Writer {
         }
     }
 
-    fn write_pending(
-        &mut self,
-        pending: &mut Option<(Box<Document>, SessionInfo)>,
-        error: &Mutex<Option<String>>,
-    ) {
-        if let Some((doc, info)) = pending.take() {
-            let result = self.write(&doc, &info);
+    fn write_pending(&mut self, pending: &mut Option<Snapshot>, error: &Mutex<Option<String>>) {
+        if let Some(snapshot) = pending.take() {
+            let result = self
+                .write(&snapshot.doc, &snapshot.info)
+                .and_then(|()| match &snapshot.history {
+                    Some(h) => self.history.write(h),
+                    None => Ok(()),
+                });
             if let Ok(mut e) = error.lock() {
                 *e = result.err().map(|e| e.to_string());
             }
@@ -253,6 +269,22 @@ impl Recoverable {
     /// Load the recovered project, repairing what the validator can.
     pub fn load(&self) -> Result<(Document, Report)> {
         crate::load_and_repair(self.dir.join(PROJECT))
+    }
+
+    /// The recovered project's undo history, if it was kept and every state
+    /// in it is sound. A history that is missing, damaged or would need
+    /// repairs is left out rather than risk undoing into a broken state;
+    /// the project itself is unaffected.
+    pub fn load_history(&self) -> Option<HistoryRecord> {
+        let record = history::read(&self.dir.join(HISTORY)).ok()?;
+        let sound = record.is_consistent()
+            && record.states.iter().all(|s| {
+                crate::validate(&s.document())
+                    .unresolved_errors()
+                    .next()
+                    .is_none()
+            });
+        sound.then_some(record)
     }
 
     /// Delete the recovery folder, once its work has been recovered or the
@@ -326,7 +358,7 @@ mod tests {
         let root = temp_root("last");
         let journal = Journal::start(&root).unwrap();
         for n in 0..10 {
-            journal.record(&edited(n), Some(Path::new("scene.fnm")), true);
+            journal.record(&edited(n), Some(Path::new("scene.fnm")), true, None);
         }
         journal.flush();
         assert!(journal.error().is_none());
@@ -344,9 +376,9 @@ mod tests {
     fn removed_layers_are_removed_from_the_journal() {
         let root = temp_root("removed");
         let journal = Journal::start(&root).unwrap();
-        journal.record(&edited(5), None, true);
+        journal.record(&edited(5), None, true, None);
         journal.flush();
-        journal.record(&edited(1), None, true);
+        journal.record(&edited(1), None, true, None);
         journal.flush();
         let layers = fs::read_dir(journal.dir().join(PROJECT).join("layers"))
             .unwrap()
@@ -360,7 +392,7 @@ mod tests {
     fn saved_sessions_left_behind_are_cleaned_up_not_offered() {
         let root = temp_root("saved");
         let journal = Journal::start(&root).unwrap();
-        journal.record(&edited(2), Some(Path::new("scene.fnm")), false);
+        journal.record(&edited(2), Some(Path::new("scene.fnm")), false, None);
         journal.flush();
         drop(journal); // ends without close(), as in a crash
         assert!(find_recoverable(&root).is_empty());
@@ -379,8 +411,23 @@ mod tests {
         let (root, n) = spec.split_once('|').unwrap();
         let journal = Journal::start(Path::new(root)).unwrap();
         let n: usize = n.parse().unwrap();
+        let mut record = HistoryRecord::default();
         for i in 0..=n {
-            journal.record(&edited(i), Some(Path::new("scene.fnm")), true);
+            // an undo history like the editor's: one state per edit
+            let like = record.states.last().cloned();
+            record
+                .states
+                .push(crate::HistoryState::capture(&edited(i), &[], like.as_ref()));
+            if i > 0 {
+                record.labels.push(format!("Edit {i}"));
+            }
+            record.cursor = i;
+            journal.record(
+                &edited(i),
+                Some(Path::new("scene.fnm")),
+                true,
+                Some(record.clone()),
+            );
             if i == n {
                 journal.flush();
             }
@@ -413,6 +460,12 @@ mod tests {
         let (doc, report) = r.load().unwrap();
         assert!(report.is_clean(), "{report}");
         assert_eq!(doc, edited(17));
+        // and so does its undo history, back to the start
+        let history = r.load_history().unwrap();
+        assert_eq!(history.cursor, 17);
+        assert_eq!(history.labels.len(), 17);
+        assert_eq!(history.states[0].document(), edited(0));
+        assert_eq!(history.states[17].document(), doc);
         r.discard();
         assert!(find_recoverable(&root).is_empty());
         fs::remove_dir_all(root).unwrap();

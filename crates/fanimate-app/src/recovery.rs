@@ -75,10 +75,12 @@ pub fn start(shell: &mut Shell) {
 
 /// Record the document as it is now.
 pub fn record(shell: &mut Shell) {
-    let ed = &shell.editor;
     if let Some(journal) = &shell.recovery.journal {
-        journal.record(&ed.doc, ed.path.as_deref(), ed.dirty);
+        let history = shell.editor.history_record();
+        let ed = &shell.editor;
+        journal.record(&ed.doc, ed.path.as_deref(), ed.dirty, Some(history));
     }
+    let ed = &shell.editor;
     shell.recovery.recorded = Some(ed.revision());
     shell.recovery.recorded_at = Instant::now();
 }
@@ -178,7 +180,7 @@ pub fn dialog(ctx: &egui::Context, shell: &mut Shell) {
     match r.load() {
         Ok((doc, _report)) => {
             let path = r.info.path.clone();
-            shell.replace_editor(Editor::recovered(doc, path));
+            shell.replace_editor(Editor::recovered(doc, path, r.load_history()));
             // the new session holds the work now; only then drop the old one
             if let Some(journal) = &shell.recovery.journal {
                 journal.flush();

@@ -2,7 +2,7 @@
 //! keyframes per layer.
 
 use eframe::egui::{self, Id, Rect, RichText, Sense, Shape, Stroke, pos2, vec2};
-use fanimate_core::{Frame, LayerId};
+use fanimate_core::{Frame, Interpolation, LayerId};
 use fanimate_editor::{Action, SelectMode};
 
 use crate::app::Shell;
@@ -159,6 +159,8 @@ fn row(
         return;
     };
     let name = layer.name.clone();
+    let visible = layer.visible;
+    let glyphs = key_glyphs(layer);
     let p = shell.palette;
     let selected = shell.editor.is_selected(id);
 
@@ -180,7 +182,7 @@ fn row(
         egui::Align2::LEFT_CENTER,
         &name,
         egui::FontId::proportional(12.0),
-        if layer.visible { p.text } else { p.text_muted },
+        if visible { p.text } else { p.text_muted },
     );
 
     // name column: select, right-click for the layer menu
@@ -201,31 +203,45 @@ fn row(
     }
     menus::context_menu(&name_resp, |ui| menus::layer_context(ui, shell));
 
-    // keyframes
+    // keyframes, shaped by how they move on: smooth round, linear
+    // diamond, step square
     let now = shell.editor.current_frame();
     let key_painter = ui.painter_at(keys.intersect(keys_clip));
-    for f in shell.editor.key_frames(id) {
+    for (f, interp) in glyphs {
         let c = pos2(x_of(f as f32), keys.center().y);
-        let s = 5.0;
         let fill = if f == now { p.accent_strong } else { p.keyframe };
-        key_painter.add(Shape::convex_polygon(
-            vec![
-                c + vec2(0.0, -s),
-                c + vec2(s, 0.0),
-                c + vec2(0.0, s),
-                c + vec2(-s, 0.0),
-            ],
-            fill,
-            Stroke::new(1.0, p.bg),
-        ));
+        let outline = Stroke::new(1.0, p.bg);
+        match interp {
+            Some(Interpolation::Smooth) => {
+                key_painter.circle(c, 4.5, fill, outline);
+            }
+            Some(Interpolation::Step) => {
+                let r = Rect::from_center_size(c, vec2(8.0, 8.0));
+                key_painter.rect(r, 1.0, fill, outline, egui::StrokeKind::Outside);
+            }
+            _ => {
+                let s = 5.0;
+                key_painter.add(Shape::convex_polygon(
+                    vec![
+                        c + vec2(0.0, -s),
+                        c + vec2(s, 0.0),
+                        c + vec2(0.0, s),
+                        c + vec2(-s, 0.0),
+                    ],
+                    fill,
+                    outline,
+                ));
+            }
+        }
     }
 
-    // key area: click to select the layer and jump to that frame;
-    // right-click to add or delete a key there
+    // key area: click to select the layer and jump to that frame; drag a
+    // key to retime it (with the keys of the other selected layers on that
+    // frame), or drag elsewhere to scrub; right-click for the key menu
     let key_resp = ui.interact(
         keys.intersect(keys_clip),
         Id::new(("tl-keys", id)),
-        Sense::click(),
+        Sense::click_and_drag(),
     );
     if key_resp.clicked() || key_resp.secondary_clicked() {
         if let Some(pos) = key_resp.interact_pointer_pos() {
@@ -235,16 +251,75 @@ fn row(
             shell.editor.select(id, SelectMode::Replace);
         }
     }
+    if key_resp.drag_started_by(egui::PointerButton::Primary)
+        && let Some(start) = ui.input(|i| i.pointer.press_origin())
+    {
+        let from = frame_at(start.x);
+        let on_key = (x_of(from as f32) - start.x).abs() <= KEY_GRAB_PX;
+        if on_key && shell.editor.key_frames(id).contains(&from) {
+            if !selected {
+                shell.editor.select(id, SelectMode::Replace);
+            }
+            shell.editor.begin_key_drag(from);
+        }
+    }
+    if key_resp.dragged_by(egui::PointerButton::Primary)
+        && let Some(pos) = key_resp.interact_pointer_pos()
+    {
+        if shell.editor.is_dragging_keys() {
+            shell.editor.drag_keys_to(frame_at(pos.x));
+        } else {
+            shell.editor.go_to(frame_at(pos.x));
+        }
+    }
+    if key_resp.drag_stopped() {
+        shell.editor.end_key_drag();
+    }
+    if key_resp.hovered()
+        && let Some(pos) = key_resp.hover_pos()
+    {
+        let f = frame_at(pos.x);
+        let on_key = (x_of(f as f32) - pos.x).abs() <= KEY_GRAB_PX;
+        if shell.editor.is_dragging_keys() || on_key && shell.editor.key_frames(id).contains(&f) {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+    }
     menus::context_menu(&key_resp, |ui| {
         let f = shell.editor.current_frame();
         ui.label(RichText::new(format!("Frame {f}")).color(p.text_muted));
         menus::item(ui, shell, Action::AddKey);
         menus::item(ui, shell, Action::DeleteKey);
+        menus::interpolation_items(ui, shell);
         ui.separator();
         menus::item(ui, shell, Action::PrevKey);
         menus::item(ui, shell, Action::NextKey);
     });
 }
+
+/// Each key frame of the layer, with the interpolation its keys share
+/// (`None` when they differ).
+fn key_glyphs(layer: &fanimate_core::Layer) -> Vec<(Frame, Option<Interpolation>)> {
+    layer
+        .key_frames()
+        .into_iter()
+        .map(|f| {
+            let mut interp: Option<Option<Interpolation>> = None;
+            layer.key_lists(|k| {
+                if let Some(i) = k.interp_at(f) {
+                    interp = Some(match interp {
+                        None => Some(i),
+                        Some(Some(j)) if j == i => Some(i),
+                        Some(_) => None,
+                    });
+                }
+            });
+            (f, interp.flatten())
+        })
+        .collect()
+}
+
+/// How close, in points, the pointer must be to a key to drag it.
+const KEY_GRAB_PX: f32 = 6.0;
 
 fn transport(ui: &mut egui::Ui, shell: &mut Shell) {
     ui.horizontal(|ui| {

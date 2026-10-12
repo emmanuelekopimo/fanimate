@@ -5,11 +5,17 @@
 //! end of each move, line and cubic command), in order. A point's curve
 //! handles (the control points either side of it) move with it, so moving
 //! a point bends only the segments it touches.
+//!
+//! Point keyframes live here too: a shape's `path_keys` hold its path at
+//! chosen frames, every key with the same commands as the shape's own path,
+//! so every edit that adds or removes points applies to all of them.
 
+use std::borrow::Cow;
 use std::collections::BTreeSet;
 
 use glam::Vec2;
 
+use crate::anim::{Frame, Interpolation, Key};
 use crate::path::{Path, PathCmd, Shape};
 
 impl Path {
@@ -77,6 +83,161 @@ impl Path {
         out
     }
 
+    /// Whether `other` is made of the same commands, so the two can be
+    /// interpolated point by point.
+    pub fn same_structure(&self, other: &Path) -> bool {
+        self.cmds.len() == other.cmds.len()
+            && self
+                .cmds
+                .iter()
+                .zip(&other.cmds)
+                .all(|(a, b)| std::mem::discriminant(a) == std::mem::discriminant(b))
+    }
+
+    /// Point by point from `a` (`t` = 0) to `b` (`t` = 1). `None` when the
+    /// paths are not made of the same commands.
+    pub fn lerp(a: &Path, b: &Path, t: f32) -> Option<Path> {
+        if !a.same_structure(b) {
+            return None;
+        }
+        let cmds = a
+            .cmds
+            .iter()
+            .zip(&b.cmds)
+            .map(|(x, y)| match (*x, *y) {
+                (PathCmd::MoveTo(p), PathCmd::MoveTo(q)) => PathCmd::MoveTo(p.lerp(q, t)),
+                (PathCmd::LineTo(p), PathCmd::LineTo(q)) => PathCmd::LineTo(p.lerp(q, t)),
+                (PathCmd::CubicTo(p1, p2, p), PathCmd::CubicTo(q1, q2, q)) => {
+                    PathCmd::CubicTo(p1.lerp(q1, t), p2.lerp(q2, t), p.lerp(q, t))
+                }
+                _ => PathCmd::Close,
+            })
+            .collect();
+        Some(Path { cmds })
+    }
+
+    /// Whether every point is a finite number.
+    pub fn is_finite(&self) -> bool {
+        self.points().all(|p| p.is_finite())
+    }
+
+    /// The segment nearest `p`: the index in `cmds` of the command that
+    /// draws it (a line, a cubic, or the `Z` that closes a subpath), how far
+    /// along it the nearest spot is (0 to 1), and the distance.
+    pub fn nearest_segment(&self, p: Vec2) -> Option<(usize, f32, f32)> {
+        let mut best: Option<(usize, f32, f32)> = None;
+        let mut start: Option<Vec2> = None;
+        let mut last: Option<Vec2> = None;
+        let consider = |i: usize, t: f32, q: Vec2, best: &mut Option<(usize, f32, f32)>| {
+            let d = q.distance(p);
+            if best.is_none_or(|b| d < b.2) {
+                *best = Some((i, t, d));
+            }
+        };
+        for (i, cmd) in self.cmds.iter().enumerate() {
+            match *cmd {
+                PathCmd::MoveTo(q) => {
+                    start = Some(q);
+                    last = Some(q);
+                }
+                PathCmd::LineTo(b) => {
+                    if let Some(a) = last {
+                        let t = closest_t(p, a, b);
+                        consider(i, t, a.lerp(b, t), &mut best);
+                    }
+                    last = Some(b);
+                }
+                PathCmd::CubicTo(c1, c2, b) => {
+                    if let Some(a) = last {
+                        // coarse search, then refine around the best sample
+                        const N: usize = 32;
+                        let mut t_best = 0.0;
+                        let mut d_best = f32::INFINITY;
+                        for k in 0..=N {
+                            let t = k as f32 / N as f32;
+                            let d = cubic(a, c1, c2, b, t).distance(p);
+                            if d < d_best {
+                                (t_best, d_best) = (t, d);
+                            }
+                        }
+                        let mut step = 1.0 / N as f32;
+                        for _ in 0..12 {
+                            step /= 2.0;
+                            for t in [t_best - step, t_best + step] {
+                                let t = t.clamp(0.0, 1.0);
+                                let d = cubic(a, c1, c2, b, t).distance(p);
+                                if d < d_best {
+                                    (t_best, d_best) = (t, d);
+                                }
+                            }
+                        }
+                        consider(i, t_best, cubic(a, c1, c2, b, t_best), &mut best);
+                    }
+                    last = Some(b);
+                }
+                PathCmd::Close => {
+                    if let (Some(a), Some(b)) = (last, start)
+                        && a != b
+                    {
+                        let t = closest_t(p, a, b);
+                        consider(i, t, a.lerp(b, t), &mut best);
+                    }
+                    last = None;
+                    start = None;
+                }
+            }
+        }
+        best
+    }
+
+    /// Split the segment drawn by `cmds[cmd]` at `t`, adding an on-curve
+    /// point there without changing the path's shape. Returns the new
+    /// point's number, or `None` if `cmd` does not draw a segment.
+    fn split(&mut self, cmd: usize, t: f32) -> Option<usize> {
+        let t = t.clamp(0.0, 1.0);
+        let from = self.segment_start(cmd)?;
+        let number = self.cmds[..cmd]
+            .iter()
+            .filter(|c| !matches!(c, PathCmd::Close))
+            .count();
+        match self.cmds[cmd] {
+            PathCmd::LineTo(b) => self.cmds.insert(cmd, PathCmd::LineTo(from.lerp(b, t))),
+            PathCmd::CubicTo(c1, c2, b) => {
+                // de Casteljau: two cubics that together trace the original
+                let (p01, p12, p23) = (from.lerp(c1, t), c1.lerp(c2, t), c2.lerp(b, t));
+                let (p012, p123) = (p01.lerp(p12, t), p12.lerp(p23, t));
+                let m = p012.lerp(p123, t);
+                self.cmds[cmd] = PathCmd::CubicTo(p123, p23, b);
+                self.cmds.insert(cmd, PathCmd::CubicTo(p01, p012, m));
+            }
+            PathCmd::Close => {
+                let first = self.subpath_start(cmd)?;
+                self.cmds.insert(cmd, PathCmd::LineTo(from.lerp(first, t)));
+            }
+            PathCmd::MoveTo(_) => return None,
+        }
+        Some(number)
+    }
+
+    /// Where the segment drawn by `cmds[cmd]` starts.
+    fn segment_start(&self, cmd: usize) -> Option<Vec2> {
+        if cmd == 0 || cmd >= self.cmds.len() {
+            return None;
+        }
+        match self.cmds[cmd - 1] {
+            PathCmd::MoveTo(p) | PathCmd::LineTo(p) | PathCmd::CubicTo(_, _, p) => Some(p),
+            PathCmd::Close => None,
+        }
+    }
+
+    /// The first point of the subpath that `cmds[cmd]` belongs to.
+    fn subpath_start(&self, cmd: usize) -> Option<Vec2> {
+        self.cmds[..cmd].iter().rev().find_map(|c| match *c {
+            PathCmd::MoveTo(p) => Some(p),
+            _ => None,
+        })
+    }
+
     /// Move the given points, and their handles, by `delta`.
     pub fn move_points(&mut self, points: &BTreeSet<usize>, delta: Vec2) {
         let points = self.with_twins(points);
@@ -99,24 +260,20 @@ impl Path {
     }
 }
 
-impl Shape {
-    /// Remove the given points. Segments either side of a removed point join
-    /// up; a subpath left with fewer than two points goes, and a closed one
-    /// left with two opens. The width profile keeps step. Returns false when
-    /// nothing is left of the shape.
-    pub fn remove_points(&mut self, points: &BTreeSet<usize>) -> bool {
-        let remove = self.path.with_twins(points);
-        let at = self.path.point_cmds();
-        let widths = self.widths.take().filter(|w| w.len() == at.len());
+impl Path {
+    /// The path without the points in `remove` (twins already included),
+    /// and the numbers of the points kept, in order.
+    fn without(&self, remove: &BTreeSet<usize>) -> (Path, Vec<usize>) {
+        let at = self.point_cmds();
         let mut cmds = Vec::new();
-        let mut kept_widths = Vec::new();
-        for (range, closed) in self.path.subpaths() {
+        let mut kept_all = Vec::new();
+        for (range, closed) in self.subpaths() {
             let kept: Vec<usize> = range.filter(|k| !remove.contains(k)).collect();
             if kept.len() < 2 {
                 continue;
             }
             for (n, &k) in kept.iter().enumerate() {
-                let cmd = self.path.cmds[at[k]];
+                let cmd = self.cmds[at[k]];
                 cmds.push(if n == 0 {
                     // a subpath starts with a move to its first kept point
                     match cmd {
@@ -130,18 +287,209 @@ impl Shape {
                 } else {
                     cmd
                 });
-                if let Some(w) = &widths {
-                    kept_widths.push(w[k]);
-                }
+                kept_all.push(k);
             }
             if closed && kept.len() > 2 {
                 cmds.push(PathCmd::Close);
             }
         }
-        self.path = Path { cmds };
-        self.widths = widths.map(|_| kept_widths);
+        (Path { cmds }, kept_all)
+    }
+}
+
+impl Shape {
+    /// Remove the given points. Segments either side of a removed point join
+    /// up; a subpath left with fewer than two points goes, and a closed one
+    /// left with two opens. The width profile and point keys keep step.
+    /// Returns false when nothing is left of the shape.
+    pub fn remove_points(&mut self, points: &BTreeSet<usize>) -> bool {
+        let remove = self.path.with_twins(points);
+        let count = self.path.on_curve_count();
+        let widths = self.widths.take().filter(|w| w.len() == count);
+        let (path, kept) = self.path.without(&remove);
+        for key in &mut self.path_keys {
+            key.value = key.value.without(&remove).0;
+        }
+        self.path = path;
+        self.widths = widths.map(|w| kept.iter().map(|&k| w[k]).collect());
         !self.path.cmds.is_empty()
     }
+
+    /// Add a point on the segment drawn by `path.cmds[cmd]`, `t` of the way
+    /// along it, in the path and every point key, without changing the
+    /// shape. Returns the new point's number.
+    pub fn insert_point(&mut self, cmd: usize, t: f32) -> Option<usize> {
+        let count = self.path.on_curve_count();
+        let mut path = self.path.clone();
+        let number = path.split(cmd, t)?;
+        for key in &mut self.path_keys {
+            key.value.split(cmd, t);
+        }
+        self.path = path;
+        if let Some(w) = self.widths.as_mut().filter(|w| w.len() == count) {
+            // the new point sits between its neighbours, so is its width
+            let before = w[number - 1];
+            let after = w.get(number).copied().unwrap_or(before);
+            w.insert(number, before + (after - before) * t.clamp(0.0, 1.0));
+        }
+        Some(number)
+    }
+
+    /// Whether `point` is the first or last point of an open subpath, so
+    /// the path can be extended from it.
+    pub fn is_open_end(&self, point: usize) -> bool {
+        self.path
+            .subpaths()
+            .iter()
+            .any(|(r, closed)| !closed && (point == r.start || point + 1 == r.end))
+    }
+
+    /// The other end of the open subpath that `point` ends.
+    pub fn other_end(&self, point: usize) -> Option<usize> {
+        self.path.subpaths().iter().find_map(|(r, closed)| {
+            if *closed || r.len() < 2 {
+                None
+            } else if point == r.start {
+                Some(r.end - 1)
+            } else if point + 1 == r.end {
+                Some(r.start)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Extend an open subpath from its end `point` with a straight segment
+    /// to a new point `offset` away from it, in the path and in every point
+    /// key. Returns the new point's number.
+    pub fn extend_from(&mut self, point: usize, offset: Vec2) -> Option<usize> {
+        let (range, _) = self
+            .path
+            .subpaths()
+            .into_iter()
+            .find(|(r, closed)| !closed && (point == r.start || point + 1 == r.end))?;
+        // a lone point is extended forwards
+        let at_start = point == range.start && range.len() > 1;
+        let count = self.path.on_curve_count();
+        let extend = |path: &mut Path| {
+            let at = path.point_cmds();
+            let pts = path.on_curve_points();
+            let new = pts[point] + offset;
+            if at_start {
+                // the new point starts the subpath; the old start joins it
+                path.cmds[at[point]] = PathCmd::LineTo(pts[point]);
+                path.cmds.insert(at[point], PathCmd::MoveTo(new));
+            } else {
+                path.cmds.insert(at[point] + 1, PathCmd::LineTo(new));
+            }
+        };
+        extend(&mut self.path);
+        for key in &mut self.path_keys {
+            extend(&mut key.value);
+        }
+        let number = if at_start { point } else { point + 1 };
+        if let Some(w) = self.widths.as_mut().filter(|w| w.len() == count) {
+            w.insert(number, w[point]);
+        }
+        Some(number)
+    }
+
+    /// Close the open subpath that ends at `point`.
+    pub fn close_subpath(&mut self, point: usize) -> bool {
+        let Some((range, _)) = self
+            .path
+            .subpaths()
+            .into_iter()
+            .find(|(r, closed)| !closed && r.len() > 2 && (point == r.start || point + 1 == r.end))
+        else {
+            return false;
+        };
+        let close = |path: &mut Path| {
+            let at = path.point_cmds();
+            path.cmds.insert(at[range.end - 1] + 1, PathCmd::Close);
+        };
+        close(&mut self.path);
+        for key in &mut self.path_keys {
+            close(&mut key.value);
+        }
+        true
+    }
+
+    /// Whether the shape has point keyframes.
+    pub fn is_animated(&self) -> bool {
+        !self.path_keys.is_empty()
+    }
+
+    /// The path at `frame`, which may fall between whole frames: as a
+    /// channel samples its keys, holding the first and last key's path
+    /// outside them.
+    pub fn path_at(&self, frame: f32) -> Cow<'_, Path> {
+        let keys = &self.path_keys;
+        let (Some(first), Some(last)) = (keys.first(), keys.last()) else {
+            return Cow::Borrowed(&self.path);
+        };
+        if frame <= first.frame as f32 {
+            return Cow::Borrowed(&first.value);
+        }
+        if frame >= last.frame as f32 {
+            return Cow::Borrowed(&last.value);
+        }
+        let next = keys.partition_point(|k| k.frame as f32 <= frame);
+        let (a, b) = (&keys[next - 1], &keys[next]);
+        let t = a
+            .interp
+            .apply((frame - a.frame as f32) / (b.frame - a.frame) as f32);
+        if t <= 0.0 {
+            return Cow::Borrowed(&a.value);
+        }
+        match Path::lerp(&a.value, &b.value, t) {
+            Some(p) => Cow::Owned(p),
+            None => Cow::Borrowed(&a.value),
+        }
+    }
+
+    /// Change the path at `frame`, following the auto-key rule: a shape
+    /// with point keys gets a key on `frame`; one without has its path
+    /// changed for the whole animation. `path` must have the shape's
+    /// commands; one that does not is ignored.
+    pub fn set_path_at(&mut self, frame: Frame, path: Path) {
+        if !path.same_structure(&self.path) {
+            return;
+        }
+        if self.is_animated() {
+            self.key_path(frame, path, Interpolation::Smooth);
+        } else {
+            self.path = path;
+        }
+    }
+
+    /// Key the path at `frame`, replacing any key there.
+    pub fn key_path(&mut self, frame: Frame, path: Path, interp: Interpolation) {
+        let key = Key {
+            frame,
+            value: path,
+            interp,
+        };
+        match self.path_keys.binary_search_by_key(&frame, |k| k.frame) {
+            Ok(i) => self.path_keys[i] = key,
+            Err(i) => self.path_keys.insert(i, key),
+        }
+    }
+}
+
+fn closest_t(p: Vec2, a: Vec2, b: Vec2) -> f32 {
+    let ab = b - a;
+    let len2 = ab.length_squared();
+    if len2 > 0.0 {
+        ((p - a).dot(ab) / len2).clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+fn cubic(p0: Vec2, c1: Vec2, c2: Vec2, p1: Vec2, t: f32) -> Vec2 {
+    let u = 1.0 - t;
+    p0 * (u * u * u) + c1 * (3.0 * u * u * t) + c2 * (3.0 * u * t * t) + p1 * (t * t * t)
 }
 
 #[cfg(test)]
@@ -215,6 +563,129 @@ mod tests {
         assert_eq!(shape.path.cmds.last(), Some(&PathCmd::Close));
         assert!(shape.remove_points(&set(&[1])));
         assert_ne!(shape.path.cmds.last(), Some(&PathCmd::Close));
+    }
+
+    fn line3() -> Shape {
+        Shape::new(
+            "l",
+            Path::new()
+                .move_to(Vec2::ZERO)
+                .line_to(Vec2::new(10.0, 0.0))
+                .line_to(Vec2::new(20.0, 0.0)),
+            Style::default().with_stroke(Color::BLACK, 1.0),
+        )
+    }
+
+    #[test]
+    fn point_keys_interpolate_and_hold_outside() {
+        let mut s = line3();
+        let mut moved = s.path.clone();
+        moved.move_points(&set(&[1]), Vec2::new(0.0, 10.0));
+        s.key_path(0, s.path.clone(), Interpolation::Linear);
+        s.key_path(10, moved.clone(), Interpolation::Linear);
+        assert!(s.is_animated());
+        assert_eq!(s.path_at(5.0).on_curve_points()[1], Vec2::new(10.0, 5.0));
+        assert_eq!(*s.path_at(-3.0), s.path);
+        assert_eq!(*s.path_at(99.0), moved);
+        // the auto-key rule: keyed shapes get a key, others change outright
+        let mut plain = line3();
+        plain.set_path_at(7, moved.clone());
+        assert!(!plain.is_animated());
+        assert_eq!(plain.path, moved);
+        s.set_path_at(7, moved.clone());
+        assert_eq!(s.path_keys.len(), 3);
+        // a path with other commands is refused
+        s.set_path_at(8, Path::circle(Vec2::ZERO, 1.0));
+        assert_eq!(s.path_keys.len(), 3);
+    }
+
+    #[test]
+    fn paths_with_different_commands_do_not_interpolate() {
+        let a = Path::rect(Vec2::ZERO, Vec2::ONE, 0.0);
+        assert!(Path::lerp(&a, &Path::circle(Vec2::ZERO, 1.0), 0.5).is_none());
+        let mut s = line3();
+        s.path_keys = vec![
+            Key {
+                frame: 0,
+                value: s.path.clone(),
+                interp: Interpolation::Linear,
+            },
+            Key {
+                frame: 10,
+                value: a,
+                interp: Interpolation::Linear,
+            },
+        ];
+        // holds the earlier key instead
+        assert_eq!(*s.path_at(5.0), s.path);
+    }
+
+    #[test]
+    fn removing_points_keeps_point_keys_in_step() {
+        let mut s = line3();
+        s.key_path(4, s.path.clone(), Interpolation::Smooth);
+        assert!(s.remove_points(&set(&[1])));
+        assert_eq!(s.path_keys[0].value, s.path);
+        assert_eq!(s.path.on_curve_count(), 2);
+    }
+
+    #[test]
+    fn inserting_a_point_keeps_the_shape() {
+        let mut s = Shape::new("c", Path::circle(Vec2::ZERO, 10.0), Style::fill(Color::BLACK));
+        let before = s.path.polylines(0.01);
+        let (cmd, t, d) = s.path.nearest_segment(Vec2::new(8.0, 8.0)).unwrap();
+        assert!(d < 2.0);
+        assert_eq!(cmd, 1);
+        let n = s.insert_point(cmd, t).unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(s.path.on_curve_count(), 6);
+        let p = s.path.on_curve_points()[1];
+        assert!((p.length() - 10.0).abs() < 0.05, "{p:?}");
+        // the outline is unchanged: every old sample still lies on the circle
+        let after = s.path.polylines(0.01);
+        for q in after.iter().flat_map(|(pts, _)| pts) {
+            assert!((q.length() - 10.0).abs() < 0.05);
+        }
+        assert!(!before.is_empty());
+    }
+
+    #[test]
+    fn inserting_on_a_line_and_the_closing_segment() {
+        let mut s = line3();
+        s.widths = Some(vec![0.0, 1.0, 0.5]);
+        s.key_path(3, s.path.clone(), Interpolation::Smooth);
+        let n = s.insert_point(2, 0.5).unwrap();
+        assert_eq!(n, 2);
+        assert_eq!(s.path.on_curve_points()[2], Vec2::new(15.0, 0.0));
+        assert_eq!(s.widths, Some(vec![0.0, 1.0, 0.75, 0.5]));
+        assert_eq!(s.path_keys[0].value, s.path);
+        let mut r = Shape::new(
+            "r",
+            Path::rect(Vec2::ZERO, Vec2::splat(10.0), 0.0),
+            Style::fill(Color::BLACK),
+        );
+        let (cmd, t, _) = r.path.nearest_segment(Vec2::new(-1.0, 5.0)).unwrap();
+        assert!(matches!(r.path.cmds[cmd], PathCmd::Close));
+        assert_eq!(r.insert_point(cmd, t), Some(4));
+        assert_eq!(r.path.on_curve_points()[4], Vec2::new(0.0, 5.0));
+    }
+
+    #[test]
+    fn extending_and_closing_an_open_path() {
+        let mut s = line3();
+        assert!(s.is_open_end(0) && s.is_open_end(2) && !s.is_open_end(1));
+        assert_eq!(s.other_end(0), Some(2));
+        assert_eq!(s.extend_from(2, Vec2::new(0.0, 10.0)), Some(3));
+        assert_eq!(s.path.on_curve_points()[3], Vec2::new(20.0, 10.0));
+        assert_eq!(s.extend_from(0, Vec2::new(-5.0, 0.0)), Some(0));
+        let pts = s.path.on_curve_points();
+        assert_eq!(pts[0], Vec2::new(-5.0, 0.0));
+        assert_eq!(pts[1], Vec2::ZERO);
+        assert!(matches!(s.path.cmds[0], PathCmd::MoveTo(_)));
+        assert!(matches!(s.path.cmds[1], PathCmd::LineTo(_)));
+        assert!(s.close_subpath(4));
+        assert_eq!(s.path.cmds.last(), Some(&PathCmd::Close));
+        assert!(!s.is_open_end(0));
     }
 
     #[test]

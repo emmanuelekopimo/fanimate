@@ -15,7 +15,9 @@ pub const FORMAT_NAME: &str = "fnm";
 /// - 0: the Phase 1 engine spike.
 /// - 1: shapes may carry a stroke width profile (`widths`), written by the
 ///   brush. Version 0 files need no conversion.
-pub const FORMAT_VERSION: u32 = 1;
+/// - 2: shapes may carry point keyframes (`path_keys`). Older files need
+///   no conversion.
+pub const FORMAT_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Manifest {
@@ -333,6 +335,44 @@ mod tests {
         assert!(report.is_clean(), "{report}");
         assert_eq!(loaded, doc);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn point_keys_round_trip() {
+        use fanimate_core::{Interpolation, LayerKind, Vec2};
+        let dir = temp_dir("point-keys");
+        let path = dir.join("p.fnm");
+        let mut doc = samples::hello();
+        let mut shape = fanimate_core::Shape::new(
+            "Blob",
+            fanimate_core::Path::circle(Vec2::new(100.0, 100.0), 40.0),
+            fanimate_core::Style::fill(fanimate_core::Color::BLACK),
+        );
+        let mut squashed = shape.path.clone();
+        squashed.move_points(&[1, 3].into_iter().collect(), Vec2::new(0.0, -20.0));
+        shape.key_path(0, shape.path.clone(), Interpolation::Smooth);
+        shape.key_path(12, squashed, Interpolation::Linear);
+        let layer = doc.new_layer("Blob", LayerKind::vector(vec![shape]));
+        doc.layers.push(layer);
+        save(&doc, &path).unwrap();
+        let (loaded, report) = load(&path).unwrap();
+        assert!(report.is_clean(), "{report}");
+        assert_eq!(loaded, doc);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn opens_version_1_projects() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/strokes-v1.fnm");
+        let (doc, report) = load(&path).unwrap();
+        assert!(report.is_clean(), "{report}");
+        let mut shapes = 0;
+        doc.walk(|l| {
+            if let fanimate_core::LayerKind::Vector { shapes: s } = &l.kind {
+                shapes += s.iter().filter(|s| s.widths.is_some()).count();
+            }
+        });
+        assert!(shapes > 0);
     }
 
     #[test]

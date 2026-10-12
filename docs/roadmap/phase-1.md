@@ -12,7 +12,7 @@ Companion to the [product vision](../product-vision.md). The brand assets propos
 |---|---|
 | M0: Ground work | **Done** |
 | M1: Engine spike | **Done on Windows**; macOS and Linux measurements outstanding |
-| M2: Draw | **In progress** |
+| M2: Draw | **Built**; the usability pass with an artist and the exit check are outstanding |
 | M3 to M6 | Not started |
 
 ### M0: Ground work (done)
@@ -67,7 +67,7 @@ Ranges are from separate runs on different days. The CLI figure is lower than th
 
 **Known driver issues.** The Vulkan driver for Intel HD Graphics 520 crashes the process while loading, before wgpu can report an error, and its OpenGL driver crashes in about 1 of 40 runs as the process exits, even when it was only loaded to list adapters. Fanimate therefore uses DirectX 12 on Windows and enables OpenGL only when DirectX 12 has no hardware adapter; `WGPU_BACKEND` (for example `vulkan` or `gl`) still overrides this.
 
-### M2: Draw (in progress)
+### M2: Draw (built; artist pass outstanding)
 
 Exit check: an artist can draw, animate by keyframes, save and recover after a forced crash.
 
@@ -82,11 +82,11 @@ Exit check: an artist can draw, animate by keyframes, save and recover after a f
 - [x] Exact hit testing (inside fills, near strokes) for selection, Paint Bucket and Eyedropper
 - [x] Crash recovery journal: after every action the open project is copied, in the background and one changed layer at a time, to a recovery folder; after a crash, the next start offers the unsaved work. A test kills a real process mid-session and checks the work comes back intact
 - [x] Open Sample now asks about unsaved changes like New and Open (it used to discard them)
-- [ ] Add Point and a pen tool for construction drawing
-- [ ] Per-object undo history that survives a crash, with a history panel (undo is still whole-document snapshots)
-- [ ] Timeline key editing: drag keys to retime, choose interpolation (smooth, linear, step) from the key menu
-- [ ] Boolean shape tools (union, subtract, intersect)
-- [ ] Animating points (point keyframes), so drawings can change shape over time
+- [x] Add Point (Moho's: click a line to add a point on it without changing its shape, drag from an open end to extend, drop on the other end to close, drag in empty space to start a line) and a Pen (Illustrator's: click for corners, drag for smooth points, click the first point to close, Enter or Esc to finish)
+- [x] Per-layer undo history that survives a crash, with a History panel: each step stores only the top-level layers it changed, sharing the rest with the step before; the history is journalled with the work (each layer state written once) and comes back with it after a crash; click any step to go to it; Undo on Selected Layer (Ctrl+Alt+Z) takes one layer back to before its own last change and leaves the rest alone. Up to 1000 steps are kept
+- [x] Timeline key editing: drag keys to retime them (with the keys of the other selected layers on that frame; dropping on a key replaces it), choose interpolation (smooth, linear, step) from the key menu or the Animation menu; keys show their interpolation (round, diamond, square)
+- [x] Boolean shape tools: Union, Subtract Front Shape and Intersect on the shapes with selected points (Edit › Combine Shapes, the Tools panel, the canvas menu). Curves come back as few smooth points; sharp corners stay sharp
+- [x] Animating points (point keyframes, `.fnm` version 2, [spec](../spec/fnm.md#point-keyframes)): Add Keyframe on a vector layer keys its drawings too, and then moving points on another frame sets a point key there (the auto-key rule); drawings interpolate point by point. Erasing and combining leave animated shapes alone rather than lose their animation
 - [ ] Usability pass with an artist, then the exit check
 
 Not yet tested by hand: pen pressure on a real tablet, and the drawing tools' feel at different zooms. The editing logic behind every tool is covered by unit tests.

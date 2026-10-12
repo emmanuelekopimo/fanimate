@@ -14,6 +14,10 @@ pub enum Action {
     // Edit
     Undo,
     Redo,
+    /// Take the selected layer back to before its own last change.
+    UndoLayer,
+    /// Go to a state in the History panel; 0 is the oldest kept.
+    GoToHistory(usize),
     Cut,
     Copy,
     Paste,
@@ -22,6 +26,12 @@ pub enum Action {
     SelectAll,
     SelectNone,
     Rename,
+    /// Finish the path being drawn with the Pen tool.
+    FinishPath,
+    /// Boolean shape operations on the shapes with selected points.
+    Union,
+    Subtract,
+    Intersect,
     Preferences,
     CommandPalette,
     // Layer
@@ -44,6 +54,8 @@ pub enum Action {
     PrevKey,
     AddKey,
     DeleteKey,
+    /// How the keys on the current frame move on to the next key.
+    SetInterpolation(fanimate_core::Interpolation),
     // View
     ZoomIn,
     ZoomOut,
@@ -69,6 +81,8 @@ impl Action {
             Quit => "Quit",
             Undo => "Undo",
             Redo => "Redo",
+            UndoLayer => "Undo on Selected Layer",
+            GoToHistory(_) => "Go to This Step",
             Cut => "Cut",
             Copy => "Copy",
             Paste => "Paste",
@@ -77,6 +91,10 @@ impl Action {
             SelectAll => "Select All Layers",
             SelectNone => "Select None",
             Rename => "Rename Layer",
+            FinishPath => "Finish Path",
+            Union => "Union Shapes",
+            Subtract => "Subtract Front Shape",
+            Intersect => "Intersect Shapes",
             Preferences => "Preferences…",
             CommandPalette => "Command Palette…",
             NewVectorLayer => "New Vector Layer",
@@ -97,6 +115,11 @@ impl Action {
             PrevKey => "Previous Keyframe",
             AddKey => "Add Keyframe",
             DeleteKey => "Delete Keyframe",
+            SetInterpolation(i) => match i {
+                fanimate_core::Interpolation::Smooth => "Interpolation: Smooth",
+                fanimate_core::Interpolation::Linear => "Interpolation: Linear",
+                fanimate_core::Interpolation::Step => "Interpolation: Step",
+            },
             ZoomIn => "Zoom In",
             ZoomOut => "Zoom Out",
             FitView => "Fit Canvas",
@@ -117,6 +140,7 @@ impl Action {
             Quit,
             Undo,
             Redo,
+            UndoLayer,
             Cut,
             Copy,
             Paste,
@@ -125,6 +149,10 @@ impl Action {
             SelectAll,
             SelectNone,
             Rename,
+            FinishPath,
+            Union,
+            Subtract,
+            Intersect,
             Preferences,
             CommandPalette,
             NewVectorLayer,
@@ -150,6 +178,7 @@ impl Action {
             FitView,
             ActualSize,
         ];
+        v.extend(fanimate_core::Interpolation::ALL.map(SetInterpolation));
         v.extend(Sample::ALL.iter().map(|s| OpenSample(*s)));
         v.extend(crate::action::Tool::ALL.iter().map(|t| Tool(*t)));
         v
@@ -221,6 +250,7 @@ pub enum Tool {
     SelectPoints,
     TranslatePoints,
     AddPoint,
+    Pen,
     Freehand,
     Rectangle,
     Ellipse,
@@ -237,10 +267,11 @@ pub enum Tool {
 }
 
 impl Tool {
-    pub const ALL: [Tool; 15] = [
+    pub const ALL: [Tool; 16] = [
         Self::SelectPoints,
         Self::TranslatePoints,
         Self::AddPoint,
+        Self::Pen,
         Self::Freehand,
         Self::Rectangle,
         Self::Ellipse,
@@ -260,6 +291,7 @@ impl Tool {
             Self::SelectPoints => "Select Points",
             Self::TranslatePoints => "Transform Points",
             Self::AddPoint => "Add Point",
+            Self::Pen => "Pen",
             Self::Freehand => "Freehand",
             Self::Rectangle => "Rectangle",
             Self::Ellipse => "Ellipse",
@@ -280,6 +312,7 @@ impl Tool {
             Self::SelectPoints
             | Self::TranslatePoints
             | Self::AddPoint
+            | Self::Pen
             | Self::Freehand
             | Self::Rectangle
             | Self::Ellipse
@@ -298,6 +331,8 @@ impl Tool {
             self,
             Self::SelectPoints
                 | Self::TranslatePoints
+                | Self::AddPoint
+                | Self::Pen
                 | Self::Freehand
                 | Self::Eraser
                 | Self::Rectangle
@@ -313,7 +348,7 @@ impl Tool {
     /// Whether the tool works on points, so Delete and Select All act on
     /// points rather than layers.
     pub fn edits_points(self) -> bool {
-        matches!(self, Self::SelectPoints | Self::TranslatePoints)
+        matches!(self, Self::SelectPoints | Self::TranslatePoints | Self::AddPoint)
     }
 
     /// Status-bar help while the tool is active.
@@ -342,7 +377,12 @@ impl Tool {
             Self::TranslatePoints => {
                 "Drag to move the selected points, or the nearest point if none are selected."
             }
-            Self::AddPoint => "This drawing tool is coming later in milestone M2.",
+            Self::AddPoint => {
+                "Click a line to add a point on it. Drag from the end of an open path to extend it, or from empty space to start a new line. Drop on the other end to close the shape."
+            }
+            Self::Pen => {
+                "Click to add corner points, drag to add smooth ones. Click the first point to close the shape; Enter or Esc finishes an open path."
+            }
             Self::SelectBone | Self::AddBone | Self::ManipulateBones => "Bone tools arrive in milestone M3.",
         }
     }

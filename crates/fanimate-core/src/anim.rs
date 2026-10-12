@@ -10,7 +10,7 @@ use crate::Color;
 pub type Frame = i32;
 
 /// How a channel moves from one keyframe to the next.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Interpolation {
     /// Hold the value until the next key.
@@ -23,6 +23,16 @@ pub enum Interpolation {
 }
 
 impl Interpolation {
+    pub const ALL: [Interpolation; 3] = [Self::Smooth, Self::Linear, Self::Step];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Smooth => "Smooth",
+            Self::Linear => "Linear",
+            Self::Step => "Step",
+        }
+    }
+
     fn is_default(&self) -> bool {
         *self == Self::default()
     }
@@ -145,6 +155,72 @@ impl<T: Animatable> Channel<T> {
     }
 }
 
+/// Keyframe editing that does not depend on the value type, so the timeline
+/// can retime or change the interpolation of every channel of a layer
+/// alike: numbers, vectors, colours and point keys.
+pub trait KeyList {
+    /// Push the frame of every key onto `out`.
+    fn frames_into(&self, out: &mut Vec<Frame>);
+
+    /// The interpolation of the key on `frame`, if there is one.
+    fn interp_at(&self, frame: Frame) -> Option<Interpolation>;
+
+    /// Move the key on `from` to `to`, replacing any key already there.
+    /// Returns whether there was a key to move.
+    fn move_key(&mut self, from: Frame, to: Frame) -> bool;
+
+    /// Set the interpolation of the key on `frame`. Returns whether it
+    /// changed.
+    fn set_interp(&mut self, frame: Frame, interp: Interpolation) -> bool;
+
+    /// Remove the key on `frame`. Returns whether there was one.
+    fn delete_key(&mut self, frame: Frame) -> bool;
+}
+
+impl<T> KeyList for Vec<Key<T>> {
+    fn frames_into(&self, out: &mut Vec<Frame>) {
+        out.extend(self.iter().map(|k| k.frame));
+    }
+
+    fn interp_at(&self, frame: Frame) -> Option<Interpolation> {
+        let i = self.binary_search_by_key(&frame, |k| k.frame).ok()?;
+        Some(self[i].interp)
+    }
+
+    fn move_key(&mut self, from: Frame, to: Frame) -> bool {
+        let Ok(i) = self.binary_search_by_key(&from, |k| k.frame) else {
+            return false;
+        };
+        let mut key = self.remove(i);
+        key.frame = to;
+        match self.binary_search_by_key(&to, |k| k.frame) {
+            Ok(j) => self[j] = key,
+            Err(j) => self.insert(j, key),
+        }
+        true
+    }
+
+    fn set_interp(&mut self, frame: Frame, interp: Interpolation) -> bool {
+        match self.binary_search_by_key(&frame, |k| k.frame) {
+            Ok(i) if self[i].interp != interp => {
+                self[i].interp = interp;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn delete_key(&mut self, frame: Frame) -> bool {
+        match self.binary_search_by_key(&frame, |k| k.frame) {
+            Ok(i) => {
+                self.remove(i);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+}
+
 impl<T: Animatable + Default> Default for Channel<T> {
     fn default() -> Self {
         Self::new(T::default())
@@ -210,5 +286,22 @@ mod tests {
         assert_eq!(c.sample(15.0), 2.0);
         assert!(c.remove_key(15).is_some());
         assert!(c.remove_key(15).is_none());
+    }
+
+    #[test]
+    fn key_list_moves_keys_replacing_any_on_the_target() {
+        let mut c = ramp();
+        assert!(c.keys.move_key(10, 25));
+        let frames: Vec<_> = c.keys.iter().map(|k| (k.frame, k.value)).collect();
+        assert_eq!(frames, [(20, 100.0), (25, 0.0)]);
+        assert!(c.keys.move_key(25, 20));
+        assert_eq!(c.keys.len(), 1);
+        assert_eq!(c.keys[0].value, 0.0);
+        assert!(!c.keys.move_key(3, 4));
+        assert!(c.keys.set_interp(20, Interpolation::Step));
+        assert!(!c.keys.set_interp(20, Interpolation::Step));
+        assert_eq!(c.keys.interp_at(20), Some(Interpolation::Step));
+        assert!(c.keys.delete_key(20));
+        assert!(!c.is_animated());
     }
 }

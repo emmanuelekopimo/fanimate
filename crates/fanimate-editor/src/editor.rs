@@ -8,12 +8,14 @@ use fanimate_core::bones::Skeleton;
 use fanimate_core::{
     Affine2, Channel, Document, Frame, Interpolation, Layer, LayerId, LayerKind, Transform, samples,
 };
-use fanimate_fnm::{FnmError, Report};
+use fanimate_fnm::{FnmError, HistoryRecord, Report};
 use serde::{Deserialize, Serialize};
 
 use crate::action::{Action, Tool};
 use crate::history::History;
 
+mod booleans;
+mod construct;
 mod draw;
 mod points;
 pub use draw::DrawStyle;
@@ -97,9 +99,25 @@ pub struct Editor {
     stroke: Option<draw::StrokeInProgress>,
     /// The eraser gesture in progress.
     erase: Option<draw::EraseInProgress>,
+    /// The Add Point drag in progress.
+    add_point: Option<construct::AddPointDrag>,
+    /// The path being drawn with the Pen.
+    pen: Option<construct::PenPath>,
     clipboard: Option<String>,
     /// Last plainly clicked layer, the anchor for Shift-click ranges.
     anchor: Option<LayerId>,
+    /// Keys being dragged along the timeline.
+    key_drag: Option<KeyDrag>,
+}
+
+/// Retiming keys by dragging them on the timeline. The selected layers are
+/// kept as they were when the drag started, so a key dragged across
+/// another and back leaves it unharmed.
+struct KeyDrag {
+    from: Frame,
+    to: Frame,
+    originals: Vec<Layer>,
+    recorded: bool,
 }
 
 impl Editor {
@@ -122,8 +140,11 @@ impl Editor {
             draw: DrawStyle::default(),
             stroke: None,
             erase: None,
+            add_point: None,
+            pen: None,
             clipboard: None,
             anchor: None,
+            key_drag: None,
         }
     }
 
@@ -155,9 +176,13 @@ impl Editor {
 
     /// Adopt work recovered after a crash. It is unsaved until saved
     /// again, to `path` if it had been saved before.
-    pub fn recovered(doc: Document, path: Option<PathBuf>) -> Self {
+    /// Its undo history comes back too, when the journal kept it.
+    pub fn recovered(doc: Document, path: Option<PathBuf>, history: Option<HistoryRecord>) -> Self {
         let mut ed = Self::new(doc);
         ed.path = path;
+        if let Some(history) = history.and_then(History::from_record) {
+            ed.history = history;
+        }
         ed.dirty = true;
         ed.set_status(StatusKind::Success, "Recovered unsaved work. Save to keep it.");
         ed
@@ -166,6 +191,12 @@ impl Editor {
     /// See the `revision` field.
     pub fn revision(&self) -> u64 {
         self.revision
+    }
+
+    /// The undo history with the document as it is now, for the crash
+    /// recovery journal.
+    pub fn history_record(&mut self) -> HistoryRecord {
+        self.history.record(&self.doc, &self.selection)
     }
 
     pub fn save_to(&mut self, path: &Path) -> Result<(), FnmError> {
@@ -182,7 +213,7 @@ impl Editor {
 
     /// Record the state before an edit. Call once per user action: for a
     /// drag, at drag start, not on every movement.
-    pub fn checkpoint(&mut self, label: &'static str) {
+    pub fn checkpoint(&mut self, label: &str) {
         self.history.push(label, &self.doc, &self.selection);
         self.dirty = true;
         self.revision += 1;
@@ -196,6 +227,8 @@ impl Editor {
         match action {
             Undo => self.undo(),
             Redo => self.redo(),
+            UndoLayer => self.undo_layer(),
+            GoToHistory(state) => self.go_to_history(state),
             Copy => {
                 return match self.copy() {
                     Some(text) => Outcome::CopyText(text),
@@ -215,6 +248,18 @@ impl Editor {
             // with a point tool, editing commands act on points
             Delete if self.tool.edits_points() && !self.points.is_empty() => {
                 self.delete_points();
+            }
+            // Esc ends a Pen path, keeping it, as in Illustrator
+            SelectNone | FinishPath if self.is_drawing_path() => self.finish_path(),
+            FinishPath => {}
+            Union => {
+                self.combine_shapes(fanimate_core::BoolOp::Union);
+            }
+            Subtract => {
+                self.combine_shapes(fanimate_core::BoolOp::Subtract);
+            }
+            Intersect => {
+                self.combine_shapes(fanimate_core::BoolOp::Intersect);
             }
             SelectAll if self.tool.edits_points() => self.select_all_points(),
             SelectNone if self.tool.edits_points() => self.points.clear(),
@@ -239,6 +284,7 @@ impl Editor {
             PrevKey => self.jump_key(false),
             AddKey => self.add_key(),
             DeleteKey => self.delete_key(),
+            SetInterpolation(interp) => self.set_interpolation(interp),
             Tool(t) => self.set_tool(t),
             AddPointOrBone => {
                 let bone = self
@@ -262,10 +308,17 @@ impl Editor {
         match action {
             Undo => self.history.undo_label().is_some(),
             Redo => self.history.redo_label().is_some(),
+            UndoLayer => self
+                .primary()
+                .is_some_and(|id| self.history.before_last_change(id, &self.doc).is_some()),
+            GoToHistory(state) => state != self.history.cursor(),
             Cut | Copy | Duplicate | Delete | GroupLayers | MoveLayerUp | MoveLayerDown
             | ToggleVisibility | AddKey | DeleteKey => has_sel,
             Rename | LayerProperties => self.primary().is_some(),
             Paste => self.clipboard.is_some(),
+            FinishPath => self.is_drawing_path(),
+            Union | Subtract | Intersect => self.can_combine(),
+            SetInterpolation(_) => self.key_interpolation().is_some(),
             Ungroup => self.selected_roots().iter().any(|id| {
                 self.doc
                     .find(*id)
@@ -276,6 +329,9 @@ impl Editor {
     }
 
     pub fn set_tool(&mut self, tool: Tool) {
+        if tool != Tool::Pen {
+            self.finish_path();
+        }
         self.tool = tool;
         if !tool.is_available() {
             self.set_status(StatusKind::Info, format!("{}: {}", tool.label(), tool.hint()));
@@ -307,6 +363,32 @@ impl Editor {
             }
             None => self.set_status(StatusKind::Info, "Nothing to redo"),
         }
+    }
+
+    /// Go straight to a state in the History panel (0 is the oldest).
+    fn go_to_history(&mut self, state: usize) {
+        if self.history.go_to(state, &mut self.doc, &mut self.selection) {
+            self.dirty = true;
+            self.revision += 1;
+            self.prune_selection();
+        }
+    }
+
+    /// Take the selected layer back to before its own last change, leaving
+    /// everything else as it is. Itself an undoable step.
+    fn undo_layer(&mut self) {
+        let Some(id) = self.primary() else { return };
+        let Some((old, label)) = self.history.before_last_change(id, &self.doc) else {
+            self.set_status(StatusKind::Info, "Nothing to undo on this layer");
+            return;
+        };
+        let name = self.doc.find(id).map(|l| l.name.clone()).unwrap_or_default();
+        self.checkpoint(&format!("Undo {label} on {name}"));
+        if let Some(l) = self.doc.find_mut(id) {
+            *l = old;
+        }
+        self.prune_selection();
+        self.set_status(StatusKind::Info, format!("Undid {label} on \"{name}\""));
     }
 
     fn prune_selection(&mut self) {
@@ -830,25 +912,9 @@ impl Editor {
     }
 
     /// Frames with any keyframe on this layer (its transform and opacity,
-    /// and for bone layers its bones), sorted.
+    /// a bone layer's bones and a vector layer's point keys), sorted.
     pub fn key_frames(&self, id: LayerId) -> Vec<Frame> {
-        let Some(layer) = self.doc.find(id) else {
-            return Vec::new();
-        };
-        let mut frames: Vec<Frame> = Vec::new();
-        let t = &layer.transform;
-        frames.extend(layer.opacity.keys.iter().map(|k| k.frame));
-        frames.extend(t.position.keys.iter().map(|k| k.frame));
-        frames.extend(t.rotation.keys.iter().map(|k| k.frame));
-        frames.extend(t.scale.keys.iter().map(|k| k.frame));
-        if let LayerKind::Bone { skeleton, .. } = &layer.kind {
-            for b in &skeleton.bones {
-                frames.extend(b.angle.keys.iter().map(|k| k.frame));
-            }
-        }
-        frames.sort_unstable();
-        frames.dedup();
-        frames
+        self.doc.find(id).map(Layer::key_frames).unwrap_or_default()
     }
 
     fn jump_key(&mut self, forward: bool) {
@@ -885,6 +951,13 @@ impl Editor {
                 key_now(&mut l.transform.rotation, frame);
                 key_now(&mut l.transform.scale, frame);
                 key_now(&mut l.opacity, frame);
+                // a vector layer's drawings too, so they can change shape
+                if let LayerKind::Vector { shapes } = &mut l.kind {
+                    for shape in shapes {
+                        let path = shape.path_at(frame as f32).into_owned();
+                        shape.key_path(frame, path, Interpolation::Smooth);
+                    }
+                }
             }
         }
     }
@@ -902,17 +975,111 @@ impl Editor {
         self.checkpoint("Delete keyframe");
         for id in roots {
             if let Some(l) = self.doc.find_mut(id) {
-                l.transform.position.remove_key(frame);
-                l.transform.rotation.remove_key(frame);
-                l.transform.scale.remove_key(frame);
-                l.opacity.remove_key(frame);
-                if let LayerKind::Bone { skeleton, .. } = &mut l.kind {
-                    for b in &mut skeleton.bones {
-                        b.angle.remove_key(frame);
-                    }
+                l.key_lists_mut(|k| {
+                    k.delete_key(frame);
+                });
+            }
+        }
+    }
+
+    /// The interpolation of the keys on the current frame of the selected
+    /// layers, if there are keys there and they all agree; `Some(None)`
+    /// when they differ.
+    pub fn key_interpolation(&self) -> Option<Option<Interpolation>> {
+        let frame = self.current_frame();
+        let mut found: Option<Option<Interpolation>> = None;
+        for id in &self.selection {
+            let Some(l) = self.doc.find(*id) else { continue };
+            l.key_lists(|k| {
+                if let Some(i) = k.interp_at(frame) {
+                    found = Some(match found {
+                        None => Some(i),
+                        Some(Some(j)) if j == i => Some(i),
+                        Some(_) => None,
+                    });
+                }
+            });
+        }
+        found
+    }
+
+    /// Set how the selected layers' keys on the current frame move on to
+    /// the next key.
+    fn set_interpolation(&mut self, interp: Interpolation) {
+        if self.key_interpolation().is_none() {
+            self.set_status(StatusKind::Info, "No keyframe on this frame");
+            return;
+        }
+        if self.key_interpolation() == Some(Some(interp)) {
+            return;
+        }
+        self.checkpoint("Change interpolation");
+        let frame = self.current_frame();
+        for id in self.selection.clone() {
+            if let Some(l) = self.doc.find_mut(id) {
+                l.key_lists_mut(|k| {
+                    k.set_interp(frame, interp);
+                });
+            }
+        }
+    }
+
+    /// Start dragging the keys on frame `from` of the selected layers along
+    /// the timeline. Returns false when none of them has a key there.
+    pub fn begin_key_drag(&mut self, from: Frame) -> bool {
+        let originals: Vec<Layer> = self
+            .selection
+            .iter()
+            .filter_map(|id| self.doc.find(*id))
+            .filter(|l| l.key_frames().contains(&from))
+            .cloned()
+            .collect();
+        if originals.is_empty() {
+            return false;
+        }
+        self.key_drag = Some(KeyDrag {
+            from,
+            to: from,
+            originals,
+            recorded: false,
+        });
+        true
+    }
+
+    /// Move the dragged keys to `to`. A key already on `to` is replaced, as
+    /// when the drag ends there. The whole drag is one undo step.
+    pub fn drag_keys_to(&mut self, to: Frame) {
+        let to = to.max(0);
+        let Some(drag) = &self.key_drag else { return };
+        if drag.to == to {
+            return;
+        }
+        if !drag.recorded {
+            self.checkpoint("Move keyframe");
+        }
+        let Some(drag) = &mut self.key_drag else { return };
+        drag.recorded = true;
+        drag.to = to;
+        let from = drag.from;
+        for original in &drag.originals {
+            if let Some(l) = self.doc.find_mut(original.id) {
+                *l = original.clone();
+                if to != from {
+                    l.key_lists_mut(|k| {
+                        k.move_key(from, to);
+                    });
                 }
             }
         }
+        self.go_to(to);
+    }
+
+    pub fn end_key_drag(&mut self) {
+        self.key_drag = None;
+    }
+
+    pub fn is_dragging_keys(&self) -> bool {
+        self.key_drag.is_some()
     }
 
     /// A layer's transform at the current frame.
@@ -1176,6 +1343,57 @@ mod tests {
     }
 
     #[test]
+    fn dragging_keys_retimes_them_in_one_undo_step() {
+        let (mut ed, [a, b, _]) = three();
+        ed.select(a, SelectMode::Replace);
+        ed.select(b, SelectMode::Toggle);
+        for f in [5, 12] {
+            ed.go_to(f);
+            ed.run(Action::AddKey);
+        }
+        ed.select(a, SelectMode::Replace);
+        assert!(!ed.begin_key_drag(7));
+        assert!(ed.begin_key_drag(5));
+        // across the key on 12 and on, then back: 12 survives
+        for f in [6, 12, 15, 9] {
+            ed.drag_keys_to(f);
+        }
+        ed.end_key_drag();
+        assert_eq!(ed.key_frames(a), [9, 12]);
+        assert_eq!(ed.key_frames(b), [5, 12]);
+        assert_eq!(ed.current_frame(), 9);
+        ed.run(Action::Undo);
+        assert_eq!(ed.key_frames(a), [5, 12]);
+        // dropping on another key replaces it
+        assert!(ed.begin_key_drag(5));
+        ed.drag_keys_to(12);
+        ed.end_key_drag();
+        assert_eq!(ed.key_frames(a), [12]);
+        // a drag that goes nowhere records nothing
+        let steps = ed.history.undo_label().map(str::to_owned);
+        assert!(ed.begin_key_drag(12));
+        ed.drag_keys_to(12);
+        ed.end_key_drag();
+        assert_eq!(ed.history.undo_label().map(str::to_owned), steps);
+    }
+
+    #[test]
+    fn interpolation_is_set_on_the_current_frames_keys() {
+        let (mut ed, [a, ..]) = three();
+        ed.select(a, SelectMode::Replace);
+        assert!(!ed.can_run(Action::SetInterpolation(Interpolation::Step)));
+        ed.go_to(4);
+        ed.run(Action::AddKey);
+        assert_eq!(ed.key_interpolation(), Some(Some(Interpolation::Smooth)));
+        ed.run(Action::SetInterpolation(Interpolation::Step));
+        assert_eq!(ed.key_interpolation(), Some(Some(Interpolation::Step)));
+        let l = ed.doc.find(a).unwrap();
+        assert_eq!(l.transform.position.keys[0].interp, Interpolation::Step);
+        ed.run(Action::Undo);
+        assert_eq!(ed.key_interpolation(), Some(Some(Interpolation::Smooth)));
+    }
+
+    #[test]
     fn playback_loops_and_frames_clamp() {
         let (mut ed, _) = three();
         ed.doc.end = 23;
@@ -1267,9 +1485,40 @@ mod tests {
 
     #[test]
     fn recovered_work_is_unsaved_and_keeps_its_path() {
-        let ed = Editor::recovered(samples::hello(), Some(PathBuf::from("scene.fnm")));
+        let ed = Editor::recovered(samples::hello(), Some(PathBuf::from("scene.fnm")), None);
         assert!(ed.dirty);
         assert_eq!(ed.path.as_deref(), Some(Path::new("scene.fnm")));
+    }
+
+    #[test]
+    fn undo_on_a_layer_leaves_the_others_alone() {
+        let (mut ed, [a, b, _]) = three();
+        ed.rename(a, "A1");
+        ed.rename(b, "B1");
+        ed.select(a, SelectMode::Replace);
+        assert!(ed.can_run(Action::UndoLayer));
+        ed.run(Action::UndoLayer);
+        assert_eq!(names(&ed), ["A", "B1", "C"]);
+        assert_eq!(ed.history.undo_label(), Some("Undo Rename on A1"));
+        // and that is undoable like any step
+        ed.run(Action::Undo);
+        assert_eq!(names(&ed), ["A1", "B1", "C"]);
+        let (_, [.., c]) = three();
+        ed.select(c, SelectMode::Replace);
+        assert!(!ed.can_run(Action::UndoLayer));
+    }
+
+    #[test]
+    fn history_survives_recovery() {
+        let (mut ed, [a, ..]) = three();
+        ed.rename(a, "A1");
+        ed.rename(a, "A2");
+        let record = ed.history_record();
+        let mut back = Editor::recovered(ed.doc.clone(), None, Some(record));
+        back.run(Action::Undo);
+        assert_eq!(names(&back), ["A1", "B", "C"]);
+        back.run(Action::GoToHistory(0));
+        assert_eq!(names(&back), ["A", "B", "C"]);
     }
 
     #[test]

@@ -4,7 +4,7 @@ use glam::Vec2;
 use serde::{Deserialize, Serialize};
 
 use crate::Color;
-use crate::anim::{Channel, Frame};
+use crate::anim::{Channel, Frame, KeyList};
 use crate::bones::Skeleton;
 use crate::path::Shape;
 use crate::transform::AnimTransform;
@@ -232,6 +232,43 @@ impl Layer {
     pub fn with_transform(mut self, transform: AnimTransform) -> Self {
         self.transform = transform;
         self
+    }
+
+    /// Every list of keys the layer holds itself: opacity, the transform,
+    /// a bone layer's bone angles and a vector layer's point keys. Not its
+    /// children's, which are their own layers on the timeline.
+    pub fn key_lists(&self, mut f: impl FnMut(&dyn KeyList)) {
+        f(&self.opacity.keys);
+        f(&self.transform.position.keys);
+        f(&self.transform.rotation.keys);
+        f(&self.transform.scale.keys);
+        match &self.kind {
+            LayerKind::Vector { shapes } => shapes.iter().for_each(|s| f(&s.path_keys)),
+            LayerKind::Bone { skeleton, .. } => skeleton.bones.iter().for_each(|b| f(&b.angle.keys)),
+            LayerKind::Group { .. } => {}
+        }
+    }
+
+    /// Mutable version of [`key_lists`](Self::key_lists).
+    pub fn key_lists_mut(&mut self, mut f: impl FnMut(&mut dyn KeyList)) {
+        f(&mut self.opacity.keys);
+        f(&mut self.transform.position.keys);
+        f(&mut self.transform.rotation.keys);
+        f(&mut self.transform.scale.keys);
+        match &mut self.kind {
+            LayerKind::Vector { shapes } => shapes.iter_mut().for_each(|s| f(&mut s.path_keys)),
+            LayerKind::Bone { skeleton, .. } => skeleton.bones.iter_mut().for_each(|b| f(&mut b.angle.keys)),
+            LayerKind::Group { .. } => {}
+        }
+    }
+
+    /// Frames with a key in any of the layer's own key lists, sorted.
+    pub fn key_frames(&self) -> Vec<Frame> {
+        let mut frames = Vec::new();
+        self.key_lists(|k| k.frames_into(&mut frames));
+        frames.sort_unstable();
+        frames.dedup();
+        frames
     }
 }
 

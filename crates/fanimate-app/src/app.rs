@@ -84,6 +84,8 @@ pub struct UiState {
     pub shape_drag: Option<fanimate_core::Vec2>,
     /// A point tool drag in progress.
     pub point_gesture: Option<crate::panels::canvas::PointGesture>,
+    /// Whether the pointer went down with the Pen on the canvas.
+    pub pen_down: bool,
     /// The status message on screen, and when it appeared.
     pub status_since: Option<(String, Instant)>,
     /// Timeline zoom (pixels per frame) and horizontal scroll (frames).
@@ -243,7 +245,7 @@ pub fn default_layout() -> DockState<Tab> {
     let [left, right] = s.split_right(
         NodeIndex::root(),
         0.74,
-        vec![Tab::Properties, Tab::Style, Tab::Actions],
+        vec![Tab::Properties, Tab::Style, Tab::Actions, Tab::History],
     );
     s.split_below(right, 0.42, vec![Tab::Layers]);
     let [canvas, _timeline] = s.split_below(left, 0.70, vec![Tab::Timeline]);
