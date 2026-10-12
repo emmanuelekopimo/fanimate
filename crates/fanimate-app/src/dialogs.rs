@@ -322,8 +322,8 @@ fn about(ctx: &egui::Context, shell: &mut Shell) {
             ui.label(RichText::new("Licensed under MIT or Apache 2.0.").color(shell.palette.text_muted));
             ui.label(RichText::new(format!("Graphics: {}", shell.gpu_name)).color(shell.palette.text_muted));
             ui.hyperlink_to(
-                "github.com/emmanuelekopimo/fanimate",
-                "https://github.com/emmanuelekopimo/fanimate",
+                "github.com/toonittmedia/fanimate",
+                "https://github.com/toonittmedia/fanimate",
             );
         });
     shell.ui.show_about = open;

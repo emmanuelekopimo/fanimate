@@ -20,7 +20,7 @@ Good ways to help right now:
 You need [rustup](https://rustup.rs). The Rust version is pinned in `rust-toolchain.toml` and installs automatically on the first build, so your checks match the release workflow exactly.
 
 ```sh
-git clone https://github.com/emmanuelekopimo/fanimate
+git clone https://github.com/toonittmedia/fanimate
 cd fanimate
 cargo run --release -p fanimate-app        # open the window with the hello sample
 cargo test --workspace                     # run the tests

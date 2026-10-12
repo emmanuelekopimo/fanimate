@@ -8,7 +8,7 @@
 <p align="center"><strong>Free to animate.</strong><br>
 Open-source 2D character animation. Rig it. Draw it. Move it.</p>
 
-<p align="center"><a href="https://github.com/emmanuelekopimo/fanimate/actions/workflows/release.yml"><img src="https://github.com/emmanuelekopimo/fanimate/actions/workflows/release.yml/badge.svg" alt="Release build"></a></p>
+<p align="center"><a href="https://github.com/toonittmedia/fanimate/actions/workflows/release.yml"><img src="https://github.com/toonittmedia/fanimate/actions/workflows/release.yml/badge.svg" alt="Release build"></a></p>
 
 ---
 
@@ -21,7 +21,7 @@ Fanimate is a free, open-source 2D character animation app. It keeps what animat
 You need [rustup](https://rustup.rs); it installs the pinned Rust version from `rust-toolchain.toml` on first build. On Linux, also install `libxkbcommon-dev`, `libwayland-dev` and `libgtk-3-dev` (for file dialogs).
 
 ```sh
-git clone https://github.com/emmanuelekopimo/fanimate
+git clone https://github.com/toonittmedia/fanimate
 cd fanimate
 cargo run --release -p fanimate-app            # open the app
 cargo run --release -p fanimate-app -- --bench # 10-second performance benchmark

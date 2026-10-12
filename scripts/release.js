@@ -181,7 +181,7 @@ function run() {
   step('Push', `git push --atomic origin main ${newTag}`);
 
   console.log(`\nPushed ${newTag}. The release workflow is building it now:`);
-  console.log('  https://github.com/emmanuelekopimo/fanimate/actions/workflows/release.yml');
+  console.log('  https://github.com/toonittmedia/fanimate/actions/workflows/release.yml');
   console.log('When it finishes, review and publish the draft release on GitHub.');
 }
 

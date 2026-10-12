@@ -1,5 +1,6 @@
 //! Apply the brand themes (brand/tokens/tokens.json) to egui.
 
+use eframe::egui::epaint::text::{FontTweak, HintingTarget, SmoothHinting};
 use eframe::egui::{self, Color32, CornerRadius, FontData, FontDefinitions, FontFamily, Stroke, Visuals};
 use serde::{Deserialize, Serialize};
 
@@ -94,9 +95,21 @@ impl Palette {
 /// symbols and icons.
 pub fn install_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
-    fonts
-        .font_data
-        .insert("Inter".into(), std::sync::Arc::new(FontData::from_static(INTER)));
+    // egui's defaults keep glyph shapes exact but look blurry at 100% scaling
+    // (the 1366x768 laptops we design for): glyphs land on quarter pixels and
+    // stems are never snapped sideways. Snap both to whole pixels instead.
+    let crisp = FontTweak {
+        subpixel_binning: Some(false),
+        hinting_target: HintingTarget::Smooth(SmoothHinting {
+            preserve_linear_metrics: false,
+            ..Default::default()
+        }),
+        ..Default::default()
+    };
+    fonts.font_data.insert(
+        "Inter".into(),
+        std::sync::Arc::new(FontData::from_static(INTER).tweak(crisp)),
+    );
     if let Some(family) = fonts.families.get_mut(&FontFamily::Proportional) {
         family.insert(0, "Inter".into());
     }

@@ -22,8 +22,8 @@ version = "0.0.4"
 edition = "2024"
 rust-version = "1.88"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/emmanuelekopimo/fanimate"
-homepage = "https://github.com/emmanuelekopimo/fanimate"
+repository = "https://github.com/toonittmedia/fanimate"
+homepage = "https://github.com/toonittmedia/fanimate"
 authors = ["The Fanimate Contributors"]
 
 [workspace.dependencies]

@@ -226,13 +226,13 @@ pub fn help(ui: &mut egui::Ui, shell: &mut Shell) {
     }
     if ui.button("Product Vision").clicked() {
         ui.ctx().open_url(egui::OpenUrl::new_tab(
-            "https://github.com/emmanuelekopimo/fanimate/blob/main/docs/product-vision.md",
+            "https://github.com/toonittmedia/fanimate/blob/main/docs/product-vision.md",
         ));
         ui.close();
     }
     if ui.button("Report a Bug").clicked() {
         ui.ctx().open_url(egui::OpenUrl::new_tab(
-            "https://github.com/emmanuelekopimo/fanimate/issues/new/choose",
+            "https://github.com/toonittmedia/fanimate/issues/new/choose",
         ));
         ui.close();
     }
