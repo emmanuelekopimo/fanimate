@@ -194,14 +194,114 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
     if let Some(l) = shell.editor.doc.find(id)
         && let LayerKind::Bone { skeleton, .. } = &l.kind
     {
+        let names: Vec<String> = skeleton.bones.iter().map(|b| b.name.clone()).collect();
         ui.add_space(8.0);
         heading(ui, shell, "Bones");
-        if skeleton.bones.is_empty() {
-            ui.label(RichText::new("No bones yet. Bone tools arrive in milestone M3.").color(muted));
+        if names.is_empty() {
+            ui.label(RichText::new("No bones yet. Draw them with the Add Bone tool.").color(muted));
         }
-        for b in &skeleton.bones {
-            ui.label(format!("{}  ·  length {:.0}", b.name, b.length));
+        let selected = shell
+            .editor
+            .selected_bone()
+            .filter(|b| b.layer == id)
+            .map(|b| b.bone);
+        for (i, n) in names.iter().enumerate() {
+            if ui.selectable_label(selected == Some(i), n).clicked() {
+                shell
+                    .editor
+                    .select_bone(Some(fanimate_editor::BoneRef { layer: id, bone: i }));
+            }
         }
+        if let Some(b) = shell.editor.selected_bone().filter(|b| b.layer == id) {
+            bone(ui, shell, b);
+        }
+    }
+}
+
+/// The selected bone's settings: name, length, limits, pin and strength.
+fn bone(ui: &mut egui::Ui, shell: &mut Shell, b: fanimate_editor::BoneRef) {
+    let Some(bone) = shell.editor.bone(b).cloned() else {
+        return;
+    };
+    ui.add_space(6.0);
+    heading(ui, shell, "Selected bone");
+    let mut edited = bone.clone();
+    let mut changed: Option<(egui::Response, &'static str)> = None;
+    egui::Grid::new("bone-props")
+        .num_columns(2)
+        .spacing([8.0, 6.0])
+        .show(ui, |ui| {
+            ui.label("Name");
+            let r = ui.add(egui::TextEdit::singleline(&mut edited.name).desired_width(140.0));
+            if r.changed() {
+                changed = Some((r, "Rename bone"));
+            }
+            ui.end_row();
+            ui.label("Length");
+            let r = ui.add(
+                egui::DragValue::new(&mut edited.length)
+                    .range(0.5..=100_000.0)
+                    .speed(0.5),
+            );
+            if r.changed() {
+                changed = Some((r, "Edit bone"));
+            }
+            ui.end_row();
+            ui.label("Pinned");
+            let r = ui
+                .checkbox(&mut edited.pinned, "")
+                .on_hover_text("Stays put when bones further down its chain are dragged");
+            if r.changed() {
+                changed = Some((r, "Pin bone"));
+            }
+            ui.end_row();
+            ui.label("Angle limits");
+            ui.horizontal(|ui| {
+                let mut on = edited.limits.is_some();
+                let r = ui.checkbox(&mut on, "");
+                if r.changed() {
+                    edited.limits = on.then_some([-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2]);
+                    changed = Some((r, "Change bone limits"));
+                }
+                if let Some([lo, hi]) = &mut edited.limits {
+                    let (mut a, mut z) = (lo.to_degrees(), hi.to_degrees());
+                    let r1 = ui.add(
+                        egui::DragValue::new(&mut a)
+                            .range(-360.0..=z)
+                            .suffix("°")
+                            .speed(0.5),
+                    );
+                    ui.label("to");
+                    let r2 = ui.add(
+                        egui::DragValue::new(&mut z)
+                            .range(a..=360.0)
+                            .suffix("°")
+                            .speed(0.5),
+                    );
+                    *lo = a.to_radians();
+                    *hi = z.to_radians();
+                    for r in [r1, r2] {
+                        if r.changed() {
+                            changed = Some((r, "Change bone limits"));
+                        }
+                    }
+                }
+            });
+            ui.end_row();
+            ui.label("Strength");
+            let mut s = edited.influence();
+            let r = ui
+                .add(egui::DragValue::new(&mut s).range(1.0..=100_000.0).speed(0.5))
+                .on_hover_text("How far the bone reaches when artwork is bound smoothly");
+            if r.changed() {
+                edited.strength = Some(s);
+                changed = Some((r, "Change bone strength"));
+            }
+            ui.end_row();
+        });
+    if let Some((r, label)) = changed {
+        begin_edit(shell, &r, label);
+        shell.editor.edit_bone(b, |bone| *bone = edited);
     }
 }
 

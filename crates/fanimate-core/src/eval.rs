@@ -84,17 +84,26 @@ impl Evaluator {
             match &layer.kind {
                 LayerKind::Vector { shapes } => {
                     for (index, shape) in shapes.iter().enumerate() {
-                        let transform = match (rig, shape.bone) {
-                            (Some((r, rel)), Some(b)) => match self.skins[r.depth].get(b) {
+                        let skinned = rig.and_then(|(r, rel)| {
+                            let weights = shape.valid_skin()?;
+                            Some((&self.skins[r.depth][..], weights, rel))
+                        });
+                        let transform = match (rig, shape.bone, skinned) {
+                            (_, _, Some(_)) => world,
+                            (Some((r, rel)), Some(b), None) => match self.skins[r.depth].get(b) {
                                 Some(skin) => r.world * *skin * rel,
                                 None => world,
                             },
                             _ => world,
                         };
+                        let mut drawn = at_frame(shape, frame);
+                        if let Some((skins, weights, rel)) = skinned {
+                            deform(drawn.to_mut(), skins, weights, rel);
+                        }
                         out.push(DrawItem {
                             layer: layer.id,
                             index,
-                            shape: at_frame(shape, frame),
+                            shape: drawn,
                             transform,
                             opacity,
                         });
@@ -128,6 +137,40 @@ impl Evaluator {
     }
 }
 
+/// Move each point of `shape` (in its layer's space) by the blend of its
+/// bones' movements. `rel` is the layer's space to the bone layer's.
+fn deform(shape: &mut Shape, skins: &[Affine2], weights: &[Vec<(usize, f32)>], rel: Affine2) {
+    use crate::PathCmd;
+    let inv = rel.inverse();
+    let moves: Vec<Affine2> = weights
+        .iter()
+        .map(|w| inv * crate::bones::blend(skins, w) * rel)
+        .collect();
+    let mut point = 0;
+    let mut prev: Option<usize> = None;
+    for cmd in &mut shape.path.cmds {
+        match cmd {
+            PathCmd::MoveTo(p) | PathCmd::LineTo(p) => {
+                *p = moves[point].transform_point2(*p);
+                prev = Some(point);
+                point += 1;
+            }
+            PathCmd::CubicTo(c1, c2, p) => {
+                // the handle leaving a point moves with it, the one arriving
+                // with the point it arrives at
+                let from = prev.unwrap_or(point);
+                *c1 = moves[from].transform_point2(*c1);
+                *c2 = moves[point].transform_point2(*c2);
+                *p = moves[point].transform_point2(*p);
+                prev = Some(point);
+                point += 1;
+            }
+            PathCmd::Close => prev = None,
+        }
+    }
+    shape.skin = None;
+}
+
 /// `shape` as it is on `frame`. Only shapes with point keys are copied, so
 /// playing unanimated artwork allocates nothing.
 fn at_frame(shape: &Shape, frame: f32) -> Cow<'_, Shape> {
@@ -143,6 +186,7 @@ fn at_frame(shape: &Shape, frame: f32) -> Cow<'_, Shape> {
             bone: shape.bone,
             widths: shape.widths.clone(),
             path_keys: Vec::new(),
+            skin: shape.skin.clone(),
         }),
     }
 }
@@ -247,6 +291,39 @@ mod tests {
         assert_eq!(items[1].index, 1);
         assert_eq!(items[1].shape.path.on_curve_points()[0], Vec2::new(5.0, 0.0));
         assert!(!items[1].shape.is_animated());
+    }
+
+    #[test]
+    fn skinned_points_follow_their_bones() {
+        let mut doc = Document::new("t", 100.0, 100.0, 24.0);
+        let mut skel = Skeleton::default();
+        let a = skel.add("a", None, Vec2::ZERO, 10.0, 0.0);
+        let b = skel.add("b", Some(a), Vec2::new(10.0, 0.0), 10.0, 0.0);
+        skel.key_angle(b, 0, FRAC_PI_2, Interpolation::Linear);
+        let mut line = Shape::new(
+            "l",
+            Path::new()
+                .move_to(Vec2::ZERO)
+                .line_to(Vec2::new(10.0, 0.0))
+                .line_to(Vec2::new(20.0, 0.0)),
+            Style::default(),
+        );
+        line.skin = Some(vec![vec![(a, 1.0)], vec![(a, 0.5), (b, 0.5)], vec![(b, 1.0)]]);
+        let art = doc.new_layer("art", LayerKind::vector(vec![line]));
+        let rig = doc.new_layer(
+            "rig",
+            LayerKind::Bone {
+                skeleton: skel,
+                children: vec![art],
+            },
+        );
+        doc.layers.push(rig);
+        let items = evaluate(&doc, 0.0);
+        let pts = items[0].shape.path.on_curve_points();
+        // the elbow stays, the tip swings down with the lower bone
+        assert!(pts[1].abs_diff_eq(Vec2::new(10.0, 0.0), 1e-4));
+        assert!(pts[2].abs_diff_eq(Vec2::new(10.0, 10.0), 1e-4), "{:?}", pts[2]);
+        assert_eq!(items[0].transform, Affine2::IDENTITY);
     }
 
     #[test]

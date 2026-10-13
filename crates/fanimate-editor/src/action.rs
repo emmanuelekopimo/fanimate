@@ -46,6 +46,12 @@ pub enum Action {
     LayerProperties,
     /// Give the selected layers this label colour.
     SetLabel(fanimate_core::Label),
+    /// Bind shapes rigidly to the selected bone.
+    BindToBone,
+    /// Bind shapes to the bones around them, with automatic weights.
+    BindSmoothly,
+    /// Stop shapes following bones.
+    Unbind,
     // Animation
     PlayPause,
     NextFrame,
@@ -109,6 +115,9 @@ impl Action {
             ToggleVisibility => "Show/Hide Layer",
             LayerProperties => "Layer Properties",
             SetLabel(l) => l.name(),
+            BindToBone => "Bind to Selected Bone",
+            BindSmoothly => "Bind Smoothly",
+            Unbind => "Release from Bones",
             PlayPause => "Play/Pause",
             NextFrame => "Next Frame",
             PrevFrame => "Previous Frame",
@@ -167,6 +176,9 @@ impl Action {
             MoveLayerDown,
             ToggleVisibility,
             LayerProperties,
+            BindToBone,
+            BindSmoothly,
+            Unbind,
             PlayPause,
             NextFrame,
             PrevFrame,
@@ -265,12 +277,13 @@ pub enum Tool {
     SelectBone,
     AddBone,
     ManipulateBones,
+    PaintWeights,
     Pan,
     Zoom,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 16] = [
+    pub const ALL: [Tool; 17] = [
         Self::SelectPoints,
         Self::TranslatePoints,
         Self::AddPoint,
@@ -285,6 +298,7 @@ impl Tool {
         Self::SelectBone,
         Self::AddBone,
         Self::ManipulateBones,
+        Self::PaintWeights,
         Self::Pan,
         Self::Zoom,
     ];
@@ -305,6 +319,7 @@ impl Tool {
             Self::SelectBone => "Select Bone",
             Self::AddBone => "Add Bone",
             Self::ManipulateBones => "Manipulate Bones",
+            Self::PaintWeights => "Paint Weights",
             Self::Pan => "Pan",
             Self::Zoom => "Zoom",
         }
@@ -322,7 +337,7 @@ impl Tool {
             | Self::Eraser => ToolGroup::Draw,
             Self::PaintBucket | Self::Eyedropper => ToolGroup::Fill,
             Self::TransformLayer => ToolGroup::Layer,
-            Self::SelectBone | Self::AddBone | Self::ManipulateBones => ToolGroup::Bone,
+            Self::SelectBone | Self::AddBone | Self::ManipulateBones | Self::PaintWeights => ToolGroup::Bone,
             Self::Pan | Self::Zoom => ToolGroup::Workspace,
         }
     }
@@ -343,6 +358,10 @@ impl Tool {
                 | Self::PaintBucket
                 | Self::Eyedropper
                 | Self::TransformLayer
+                | Self::SelectBone
+                | Self::AddBone
+                | Self::ManipulateBones
+                | Self::PaintWeights
                 | Self::Pan
                 | Self::Zoom
         )
@@ -386,7 +405,18 @@ impl Tool {
             Self::Pen => {
                 "Click to add corner points, drag to add smooth ones. Click the first point to close the shape; Enter or Esc finishes an open path."
             }
-            Self::SelectBone | Self::AddBone | Self::ManipulateBones => "Bone tools arrive in milestone M3.",
+            Self::SelectBone => {
+                "Click a bone to select it. Drag its tip to change its length and rest angle, or its joint to move it."
+            }
+            Self::AddBone => {
+                "Drag to draw a bone on the selected bone layer. It joins the selected bone, so drag from its tip to build a chain."
+            }
+            Self::ManipulateBones => {
+                "Drag a bone to pose its chain (inverse kinematics; a pinned bone stops it). Alt-drag turns one bone only. Sets keyframes on the current frame."
+            }
+            Self::PaintWeights => {
+                "Select a bone, then brush over points of a bound vector layer to make them follow that bone more. Alt brushes them away from it."
+            }
         }
     }
 }

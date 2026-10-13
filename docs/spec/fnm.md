@@ -133,6 +133,7 @@ A skeleton. Shapes on vector layers anywhere inside `children` can bind to its b
 | `bone` | integer | Optional. Index of the bone this shape follows, in the nearest enclosing bone layer. |
 | `widths` | array of numbers | Optional (version 1). The stroke's [width profile](#width-profiles). |
 | `path_keys` | array of keys | Optional (version 2). [Point keyframes](#point-keyframes): the path at chosen frames. |
+| `skin` | array | Optional (version 3). [Smooth binding](#smooth-binding): per on-curve point, the bones it follows. Takes the place of `bone`. |
 
 A bound shape's points are stored in the **rest pose**. At each frame the shape moves rigidly with its bone: from the bone's rest transform to its current transform. Weighted deformation (one point following several bones) will be added in a later version.
 
@@ -154,6 +155,19 @@ Brush strokes vary in width along their length, from pen pressure and tapered en
 - Values are finite and not negative. A profile whose length does not match the path is ignored: the stroke is drawn at `style.stroke.width` everywhere.
 - A stroke with a profile has round caps and round joins. Without one, caps are flat (butt) and joins are mitred.
 - `widths` has no effect on fills, or on a shape without a stroke.
+
+### Smooth binding
+
+A shape can follow several bones, each point blending their movements, so limbs bend smoothly at joints:
+
+```json
+"skin": [[[0, 1.0]], [[0, 0.6], [1, 0.4]], [[1, 1.0]]]
+```
+
+- One entry per **on-curve point**, in order, as for `widths`. Each entry is a list of `[bone, weight]` pairs; `bone` indexes the nearest enclosing bone layer's skeleton.
+- Weights are finite and not negative. They are normalised when drawn, so they need not add up to 1; a point whose weights add up to 0 does not move.
+- At each frame a point moves by the weighted average of its bones' movements from their rest transforms to their current ones. A curve handle moves with the on-curve point it leaves from (the first control point of a `C`) or arrives at (the second).
+- Points (and point keys) are stored in the rest pose. A `skin` whose length does not match the path's on-curve points is ignored.
 
 ### Point keyframes
 
@@ -208,6 +222,9 @@ Every subpath starts with `M`. Drawing commands with no open subpath (before the
 | `origin` | vector | Joint position in the parent bone's space (x along the parent bone), or in the bone layer's space for a root bone |
 | `length` | number | Bone length |
 | `angle` | channel of number | Rotation relative to the parent, radians. `base` is the **rest pose**. |
+| `limits` | `[min, max]` | Optional (version 3). Lowest and highest angle, radians; the angle is kept within them when drawn and posed. |
+| `pinned` | boolean | Optional (version 3), default `false`. Inverse kinematics does not move this bone or past it. |
+| `strength` | number | Optional (version 3). How far the bone reaches when weights are made automatically; default half its length. |
 
 Each bone's local space has its origin at the joint and +x pointing along the bone. Its transform at a frame is `parent_world × translate(origin) × rotate(angle)`.
 
@@ -280,6 +297,11 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | Point keyframes on negative frames, out of order, duplicated or not finite | Error | As for channel keys |
 | Negative or non-finite value in a width profile | Error | Non-finite becomes 1, negative becomes 0 |
 | Shape bound to a bone that does not exist, or outside any bone layer | Warning | Unbind the shape |
+| `skin` whose length does not match the path's on-curve points | Error | Remove the skin |
+| `skin` weight naming a missing bone, or not a finite non-negative number | Error | Remove that weight |
+| `skin` outside any bone layer | Warning | Remove the skin |
+| Bone `limits` not a finite range with min ≤ max | Error | Remove the limits |
+| Bone `strength` not a positive number | Warning | Use the default |
 | Keyframe after the `end` frame | Warning | None; the key is kept |
 | Opacity outside 0 to 1 | Warning | None; clamped when drawn |
 
@@ -297,4 +319,4 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | 0 | Fanimate 0.0.1 | First version: layers, shapes, bones, channels | |
 | 1 | Development builds after Fanimate 0.0.5 (never released) | Shapes may have a stroke width profile (`widths`), written by the brush | Version 0 files need no conversion. A version 0 reader would ignore `widths` and draw brush strokes at one width, so the version was bumped. |
 | 2 | Fanimate 0.0.6 | Shapes may have point keyframes (`path_keys`) | Older files need no conversion. An older reader would ignore `path_keys` and draw animated drawings without their animation, so the version was bumped. |
-| 3 | Fanimate 0.0.7 | Layers may have a label colour (`label`) | Older files need no conversion. An older reader would drop labels when saving, so the version was bumped. |
+| 3 | Fanimate 0.0.7 | Layers may have a label colour (`label`); bones may have `limits`, `pinned` and `strength`; shapes may have a smooth binding (`skin`) | Older files need no conversion. An older reader would drop labels and draw smoothly bound artwork unbound, so the version was bumped. |

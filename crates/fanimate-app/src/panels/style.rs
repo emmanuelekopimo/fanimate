@@ -91,6 +91,15 @@ fn new_artwork(ui: &mut egui::Ui, shell: &mut Shell) {
             ui.add(egui::DragValue::new(&mut d.eraser).range(1.0..=1000.0).speed(0.5))
                 .on_hover_text("Eraser size, in canvas pixels");
             ui.end_row();
+
+            ui.label(RichText::new("Weight brush").color(muted));
+            ui.add(
+                egui::DragValue::new(&mut d.weight_brush)
+                    .range(1.0..=2000.0)
+                    .speed(0.5),
+            )
+            .on_hover_text("Paint Weights brush size, in canvas pixels");
+            ui.end_row();
         });
     ui.add_space(4.0);
 }

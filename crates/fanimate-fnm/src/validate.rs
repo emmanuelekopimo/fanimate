@@ -264,6 +264,7 @@ impl Checker {
                     let sloc = format!("{loc} > shape {i} \"{}\"", shape.name);
                     self.widths(shape, &sloc);
                     self.path_keys(shape, &sloc, end);
+                    self.skin(shape, &sloc, bones);
                 }
             }
             LayerKind::Group { children } => {
@@ -302,6 +303,32 @@ impl Checker {
                             }
                         }
                     }
+                    if bone
+                        .limits
+                        .is_some_and(|[lo, hi]| !(lo.is_finite() && hi.is_finite() && lo <= hi))
+                    {
+                        self.issue(
+                            Severity::Error,
+                            &bloc,
+                            "angle limits are not a valid range; they are removed".into(),
+                            true,
+                        );
+                        if self.repair {
+                            bone.limits = None;
+                        }
+                    }
+                    if bone.strength.is_some_and(|s| !(s.is_finite() && s > 0.0)) {
+                        self.issue(
+                            Severity::Warning,
+                            &bloc,
+                            "strength is not a positive number; the default is used".into(),
+                            true,
+                        );
+                        if self.repair {
+                            bone.strength = None;
+                        }
+                    }
+                    let bone = &mut skeleton.bones[i];
                     let mut angle = std::mem::replace(&mut bone.angle, Channel::new(0.0));
                     self.channel(&mut angle, &bloc, "angle", end);
                     skeleton.bones[i].angle = angle;
@@ -347,6 +374,58 @@ impl Checker {
                     } else if *w < 0.0 {
                         *w = 0.0;
                     }
+                }
+            }
+        }
+    }
+
+    /// Smooth binding: one weight list per point, naming bones that exist,
+    /// with finite, non-negative weights.
+    fn skin(&mut self, shape: &mut fanimate_core::Shape, loc: &str, bones: Option<usize>) {
+        let points = shape.path.on_curve_count();
+        let Some(skin) = &mut shape.skin else { return };
+        let Some(n) = bones else {
+            self.issue(
+                Severity::Warning,
+                loc,
+                "has bone weights but is not inside a bone layer; it will not move with a rig".into(),
+                true,
+            );
+            if self.repair {
+                shape.skin = None;
+            }
+            return;
+        };
+        if skin.len() != points {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!(
+                    "has bone weights for {} points but {points} points; the weights are removed",
+                    skin.len()
+                ),
+                true,
+            );
+            if self.repair {
+                shape.skin = None;
+            }
+            return;
+        }
+        let bad = skin
+            .iter()
+            .flatten()
+            .filter(|(b, w)| *b >= n || !(w.is_finite() && *w >= 0.0))
+            .count();
+        if bad > 0 {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!("{bad} bone weight(s) name a missing bone or are not a valid number"),
+                true,
+            );
+            if self.repair {
+                for point in skin.iter_mut() {
+                    point.retain(|(b, w)| *b < n && w.is_finite() && *w >= 0.0);
                 }
             }
         }
@@ -610,6 +689,26 @@ mod tests {
         };
         let frames: Vec<_> = shapes[0].path_keys.iter().map(|k| k.frame).collect();
         assert_eq!(frames, [0, 2]);
+    }
+
+    #[test]
+    fn bad_bone_settings_and_weights_are_repaired() {
+        let mut doc = rigged();
+        let LayerKind::Bone { skeleton, children } = &mut doc.layers[0].kind else {
+            unreachable!()
+        };
+        skeleton.bones[0].limits = Some([1.0, -1.0]);
+        skeleton.bones[0].strength = Some(f32::NAN);
+        let LayerKind::Vector { shapes } = &mut children[0].kind else {
+            unreachable!()
+        };
+        let n = shapes[0].path.on_curve_count();
+        shapes[0].skin = Some(vec![vec![(0, 1.0), (9, 0.5)]; n]);
+        shapes[1].skin = Some(vec![vec![(0, 1.0)]; 2]);
+        let report = validate(&doc);
+        assert_eq!(report.issues.len(), 4, "{report}");
+        repair(&mut doc);
+        assert!(validate(&doc).is_clean(), "{}", validate(&doc));
     }
 
     #[test]

@@ -29,6 +29,8 @@ pub struct DrawStyle {
     pub taper: f32,
     /// Eraser diameter, in document units.
     pub eraser: f32,
+    /// Weight brush diameter, in document units.
+    pub weight_brush: f32,
 }
 
 impl Default for DrawStyle {
@@ -41,6 +43,7 @@ impl Default for DrawStyle {
             smoothing: 0.5,
             taper: 20.0,
             eraser: 20.0,
+            weight_brush: 40.0,
         }
     }
 }

@@ -207,6 +207,8 @@ const FANIMATE: &[(&str, Action)] = &[
     ("Ctrl+OpenBracket", MoveLayerDown),
     ("Ctrl+Shift+H", ToggleVisibility),
     ("Ctrl+Shift+I", LayerProperties),
+    ("Ctrl+B", BindToBone),
+    ("Ctrl+Shift+B", BindSmoothly),
     // Animation (F6 / Shift+F6 as in Adobe Animate)
     ("Space", PlayPause),
     ("Right", NextFrame),
@@ -238,6 +240,7 @@ const FANIMATE: &[(&str, Action)] = &[
     ("M", Tool(Tool::ManipulateBones)),
     ("Shift+M", Tool(Tool::AddBone)),
     ("J", Tool(Tool::SelectBone)),
+    ("W", Tool(Tool::PaintWeights)),
     ("H", Tool(Tool::Pan)),
     ("Z", Tool(Tool::Zoom)),
 ];

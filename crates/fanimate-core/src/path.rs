@@ -273,6 +273,11 @@ pub struct Shape {
     /// the points differ, so they interpolate point by point.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub path_keys: Vec<Key<Path>>,
+    /// Smooth binding: for each on-curve point, the bones of the nearest
+    /// enclosing bone layer it follows and their weights. A point's curve
+    /// handles move with it. Takes the place of `bone` when set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skin: Option<crate::bones::Skin>,
 }
 
 impl Shape {
@@ -284,7 +289,15 @@ impl Shape {
             bone: None,
             widths: None,
             path_keys: Vec::new(),
+            skin: None,
         }
+    }
+
+    /// The smooth binding, if it has one weight list per on-curve point.
+    pub fn valid_skin(&self) -> Option<&[Vec<(usize, f32)>]> {
+        self.skin
+            .as_deref()
+            .filter(|s| s.len() == self.path.on_curve_count())
     }
 
     /// Move the shape by `t`, scaling its stroke width by `t`'s average

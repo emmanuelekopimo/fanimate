@@ -14,10 +14,12 @@ use serde::{Deserialize, Serialize};
 use crate::action::{Action, Tool};
 use crate::history::History;
 
+mod bones;
 mod booleans;
 mod construct;
 mod draw;
 mod points;
+pub use bones::BoneRef;
 pub use draw::DrawStyle;
 pub use points::PointRef;
 
@@ -108,6 +110,10 @@ pub struct Editor {
     anchor: Option<LayerId>,
     /// Keys being dragged along the timeline.
     key_drag: Option<KeyDrag>,
+    /// The selected bone, for the bone tools and binding.
+    bone: Option<BoneRef>,
+    /// The bone gesture in progress.
+    bone_drag: Option<bones::BoneDrag>,
 }
 
 /// Retiming keys by dragging them on the timeline. The selected layers are
@@ -145,6 +151,8 @@ impl Editor {
             clipboard: None,
             anchor: None,
             key_drag: None,
+            bone: None,
+            bone_drag: None,
         }
     }
 
@@ -249,6 +257,21 @@ impl Editor {
             Delete if self.tool.edits_points() && !self.points.is_empty() => {
                 self.delete_points();
             }
+            // with a bone tool, Delete deletes the selected bone
+            Delete
+                if self.tool.group() == crate::action::ToolGroup::Bone && self.selected_bone().is_some() =>
+            {
+                self.delete_selected_bone();
+            }
+            BindToBone => {
+                self.bind_to_bone();
+            }
+            BindSmoothly => {
+                self.bind_smoothly();
+            }
+            Unbind => {
+                self.unbind();
+            }
             // Esc ends a Pen path, keeping it, as in Illustrator
             SelectNone | FinishPath if self.is_drawing_path() => self.finish_path(),
             FinishPath => {}
@@ -317,6 +340,7 @@ impl Editor {
             | ToggleVisibility | AddKey | DeleteKey => has_sel,
             Rename | LayerProperties => self.primary().is_some(),
             SetLabel(_) => has_sel,
+            BindToBone | BindSmoothly | Unbind => self.can_bind(),
             Paste => self.clipboard.is_some(),
             FinishPath => self.is_drawing_path(),
             Union | Subtract | Intersect => self.can_combine(),

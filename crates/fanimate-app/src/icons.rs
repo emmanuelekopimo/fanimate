@@ -73,6 +73,7 @@ impl Icon {
                 Tool::SelectBone => own!("bone-select"),
                 Tool::AddBone => own!("bone-plus"),
                 Tool::ManipulateBones => own!("bone-rotate"),
+                Tool::PaintWeights => lucide!("brush"),
                 Tool::Pan => lucide!("hand"),
                 Tool::Zoom => lucide!("zoom-in"),
             },

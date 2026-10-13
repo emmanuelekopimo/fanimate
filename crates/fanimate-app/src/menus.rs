@@ -169,6 +169,12 @@ pub fn layer(ui: &mut egui::Ui, shell: &mut Shell) {
     );
     label_menu(ui, shell);
     ui.separator();
+    items(
+        ui,
+        shell,
+        &[Action::BindToBone, Action::BindSmoothly, Action::Unbind],
+    );
+    ui.separator();
     item(ui, shell, Action::LayerProperties);
 }
 
@@ -336,6 +342,14 @@ pub fn layer_context(ui: &mut egui::Ui, shell: &mut Shell) {
         ],
     );
     label_menu(ui, shell);
+    ui.menu_button("Bones", |ui| {
+        ui.set_min_width(MENU_MIN_WIDTH);
+        items(
+            ui,
+            shell,
+            &[Action::BindToBone, Action::BindSmoothly, Action::Unbind],
+        );
+    });
     ui.separator();
     items(ui, shell, &[Action::AddKey, Action::DeleteKey]);
     ui.separator();
