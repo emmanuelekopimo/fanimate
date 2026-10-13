@@ -5,6 +5,7 @@ members = [
     "crates/fanimate-fnm",
     "crates/fanimate-editor",
     "crates/fanimate-render",
+    "crates/fanimate-export",
     "crates/fanimate-app",
     "crates/fanimate-cli",
 ]
@@ -13,6 +14,7 @@ default-members = [
     "crates/fanimate-fnm",
     "crates/fanimate-editor",
     "crates/fanimate-render",
+    "crates/fanimate-export",
     "crates/fanimate-app",
     "crates/fanimate-cli",
 ]
@@ -31,6 +33,7 @@ fanimate-core = { path = "crates/fanimate-core" }
 fanimate-fnm = { path = "crates/fanimate-fnm" }
 fanimate-render = { path = "crates/fanimate-render" }
 fanimate-editor = { path = "crates/fanimate-editor" }
+fanimate-export = { path = "crates/fanimate-export" }
 
 bytemuck = { version = "1.25", features = ["derive"] }
 glam = { version = "0.34", features = ["serde"] }

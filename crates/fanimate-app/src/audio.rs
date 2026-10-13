@@ -10,59 +10,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use fanimate_core::{Document, LayerKind};
-
-/// A sound, decoded to interleaved samples from -1 to 1.
-pub struct Decoded {
-    pub rate: u32,
-    pub channels: u16,
-    pub samples: Vec<f32>,
-}
-
-impl Decoded {
-    fn frames(&self) -> usize {
-        self.samples.len() / self.channels.max(1) as usize
-    }
-
-    /// The sound at `t` seconds, mixed down to (left, right).
-    fn at(&self, t: f64) -> (f32, f32) {
-        let pos = t * self.rate as f64;
-        if pos < 0.0 {
-            return (0.0, 0.0);
-        }
-        let i = pos as usize;
-        if i + 1 >= self.frames() {
-            return (0.0, 0.0);
-        }
-        let frac = (pos - i as f64) as f32;
-        let c = self.channels as usize;
-        let get = |frame: usize, ch: usize| self.samples[frame * c + ch.min(c - 1)];
-        let lerp = |ch| get(i, ch) + (get(i + 1, ch) - get(i, ch)) * frac;
-        (lerp(0), lerp(1))
-    }
-}
-
-/// Decode a WAV file. `None` if it cannot be read.
-pub fn decode(bytes: &[u8]) -> Option<Decoded> {
-    let mut reader = hound::WavReader::new(std::io::Cursor::new(bytes)).ok()?;
-    let spec = reader.spec();
-    let samples: Vec<f32> = match spec.sample_format {
-        hound::SampleFormat::Float => reader.samples::<f32>().filter_map(Result::ok).collect(),
-        hound::SampleFormat::Int => {
-            let scale = 1.0 / (1u64 << (spec.bits_per_sample.clamp(1, 32) - 1)) as f32;
-            reader
-                .samples::<i32>()
-                .filter_map(Result::ok)
-                .map(|s| s as f32 * scale)
-                .collect()
-        }
-    };
-    (spec.channels > 0 && spec.sample_rate > 0).then_some(Decoded {
-        rate: spec.sample_rate,
-        channels: spec.channels,
-        samples,
-    })
-}
+use fanimate_core::Document;
+use fanimate_export::sound::{Decoded, decode};
 
 /// One audio layer to mix: its sound, when it starts, how loud.
 #[derive(Clone)]
@@ -108,22 +57,14 @@ impl Audio {
 
     /// The audible audio layers of `doc`.
     fn voices(&mut self, doc: &Document) -> Vec<Voice> {
-        let mut layers = Vec::new();
-        doc.walk(|l| {
-            if let LayerKind::Audio(a) = &l.kind
-                && l.visible
-            {
-                layers.push((a.media.clone(), a.start, a.volume));
-            }
-        });
         let fps = doc.fps.max(1.0) as f64;
-        layers
+        fanimate_export::sound::voices(doc)
             .into_iter()
-            .filter_map(|(name, start, volume)| {
+            .filter_map(|v| {
                 Some(Voice {
-                    sound: self.sound(doc, &name)?,
-                    start_seconds: start as f64 / fps,
-                    volume,
+                    sound: self.sound(doc, &v.media)?,
+                    start_seconds: v.start as f64 / fps,
+                    volume: v.volume,
                 })
             })
             .collect()
@@ -256,17 +197,6 @@ mod tests {
             w.finalize().unwrap();
         }
         bytes
-    }
-
-    #[test]
-    fn decodes_and_samples_between_frames() {
-        let d = decode(&wav(1, &[0, 16384, 0, -16384])).unwrap();
-        assert_eq!(d.frames(), 4);
-        let (l, r) = d.at(0.005);
-        assert!((l - 0.25).abs() < 1e-3 && l == r);
-        assert_eq!(d.at(-1.0), (0.0, 0.0));
-        assert_eq!(d.at(10.0), (0.0, 0.0));
-        assert!(decode(b"nope").is_none());
     }
 
     #[test]
