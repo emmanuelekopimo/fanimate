@@ -357,6 +357,11 @@ mod tests {
     use fanimate_core::{LayerKind, samples};
     use std::process::Command;
 
+    /// Starting a process copies every open file into it until it runs its
+    /// program, session locks included, so a test that needs a dropped
+    /// session's lock released must not overlap the crash test's spawn.
+    static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     fn temp_root(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("fanimate-journal-{}-{name}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -415,6 +420,7 @@ mod tests {
     #[test]
     fn saved_sessions_left_behind_are_cleaned_up_not_offered() {
         let root = temp_root("saved");
+        let _spawn = SPAWN.lock().unwrap_or_else(|e| e.into_inner());
         let journal = Journal::start(&root).unwrap();
         journal.record(&edited(2), Some(Path::new("scene.fnm")), false, None);
         journal.flush();
@@ -464,6 +470,7 @@ mod tests {
     #[test]
     fn work_survives_a_crashed_process() {
         let root = temp_root("crash");
+        let spawn = SPAWN.lock().unwrap_or_else(|e| e.into_inner());
         let status = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
@@ -474,6 +481,7 @@ mod tests {
             .env(CHILD, format!("{}|17", root.display()))
             .status()
             .unwrap();
+        drop(spawn);
         assert!(!status.success(), "the child should have aborted");
 
         let found = find_recoverable(&root);
