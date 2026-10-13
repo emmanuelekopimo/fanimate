@@ -40,6 +40,7 @@ pub enum Action {
     NewVectorLayer,
     NewGroupLayer,
     NewBoneLayer,
+    NewFramesLayer,
     GroupLayers,
     Ungroup,
     MoveLayerUp,
@@ -75,6 +76,10 @@ pub enum Action {
     PrevKey,
     AddKey,
     DeleteKey,
+    /// A blank drawing on the current frame of a frame-by-frame layer.
+    NewDrawing,
+    /// The sub-layer the tools draw on in frame-by-frame layers.
+    SetPart(fanimate_core::Part),
     /// How the keys on the current frame move on to the next key.
     SetInterpolation(fanimate_core::Interpolation),
     // View
@@ -122,6 +127,14 @@ impl Action {
             NewVectorLayer => "New Vector Layer",
             NewGroupLayer => "New Group",
             NewBoneLayer => "New Bone Layer",
+            NewFramesLayer => "New Frame-by-Frame Layer",
+            NewDrawing => "New Blank Drawing",
+            SetPart(p) => match p {
+                fanimate_core::Part::Rough => "Draw on Rough",
+                fanimate_core::Part::Colour => "Draw on Colour",
+                fanimate_core::Part::Line => "Draw on Line",
+                fanimate_core::Part::Overlay => "Draw on Overlay",
+            },
             GroupLayers => "Group Layers",
             Ungroup => "Ungroup",
             MoveLayerUp => "Move Layer Up",
@@ -191,6 +204,7 @@ impl Action {
             NewVectorLayer,
             NewGroupLayer,
             NewBoneLayer,
+            NewFramesLayer,
             GroupLayers,
             Ungroup,
             MoveLayerUp,
@@ -212,12 +226,14 @@ impl Action {
             PrevKey,
             AddKey,
             DeleteKey,
+            NewDrawing,
             ZoomIn,
             ZoomOut,
             FitView,
             ActualSize,
         ];
         v.extend(fanimate_core::Interpolation::ALL.map(SetInterpolation));
+        v.extend(fanimate_core::Part::ALL.map(SetPart));
         v.extend(Sample::ALL.iter().map(|s| OpenSample(*s)));
         v.extend(crate::action::Tool::ALL.iter().map(|t| Tool(*t)));
         v

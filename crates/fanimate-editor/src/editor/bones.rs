@@ -349,8 +349,7 @@ impl Editor {
         let with_points: BTreeSet<(LayerId, usize)> =
             self.points.iter().map(|p| (p.layer, p.shape)).collect();
         for &id in &self.selection {
-            let Some(layer) = self.doc.find(id) else { continue };
-            let LayerKind::Vector { shapes } = &layer.kind else {
+            let Some(shapes) = self.layer_shapes(id) else {
                 continue;
             };
             let Some(rig) = self.enclosing_rig(id) else {
@@ -751,11 +750,26 @@ fn bone_parent(ed: &Editor, b: BoneRef) -> Option<BoneRef> {
 }
 
 fn for_shapes(ed: &mut Editor, id: LayerId, shapes: &[usize], mut f: impl FnMut(&mut Shape)) {
-    if let Some(LayerKind::Vector { shapes: all }) = ed.doc.find_mut(id).map(|l| &mut l.kind) {
+    if let Some(all) = ed.layer_shapes_mut(id) {
         for &i in shapes {
             if let Some(s) = all.get_mut(i) {
                 f(s);
             }
+        }
+    }
+}
+
+fn renumber_shape(s: &mut Shape, map: &[Option<usize>]) {
+    s.bone = s.bone.and_then(|b| map.get(b).copied().flatten());
+    if let Some(skin) = &mut s.skin {
+        for point in skin.iter_mut() {
+            point.retain_mut(|(b, _)| match map.get(*b).copied().flatten() {
+                Some(n) => {
+                    *b = n;
+                    true
+                }
+                None => false,
+            });
         }
     }
 }
@@ -765,6 +779,11 @@ fn for_shapes(ed: &mut Editor, id: LayerId, shapes: &[usize], mut f: impl FnMut(
 fn renumber_bones(layer: &mut fanimate_core::Layer, map: &[Option<usize>]) {
     fn go(layer: &mut fanimate_core::Layer, map: &[Option<usize>]) {
         match &mut layer.kind {
+            LayerKind::Frames { cels } => {
+                for s in cels.iter_mut().flat_map(|c| c.shapes_mut()) {
+                    renumber_shape(s, map);
+                }
+            }
             LayerKind::Vector { shapes } => {
                 for s in shapes {
                     s.bone = s.bone.and_then(|b| map.get(b).copied().flatten());

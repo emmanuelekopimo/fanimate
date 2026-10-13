@@ -161,7 +161,11 @@ impl Offscreen {
             target_view: target.create_view(&Default::default()),
             target,
             size,
-            evaluator: Evaluator::default(),
+            // renders leave out rough sketches, which are for the animator
+            evaluator: Evaluator {
+                skip_rough: true,
+                ..Evaluator::default()
+            },
             tess: Tessellator::new(),
             mesh: Mesh::new(),
         }

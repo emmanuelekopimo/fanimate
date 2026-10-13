@@ -84,6 +84,7 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
         LayerKind::Group { .. } => "Group",
         LayerKind::Bone { .. } => "Bone layer",
         LayerKind::Image(_) => "Image layer",
+        LayerKind::Frames { .. } => "Frame-by-frame layer",
     };
     let mut name = l.name.clone();
     let mut visible = l.visible;
@@ -193,6 +194,15 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
         );
     });
     if let Some(l) = shell.editor.doc.find(id)
+        && let LayerKind::Frames { cels } = &l.kind
+    {
+        let count = cels.len();
+        ui.add_space(8.0);
+        heading(ui, shell, "Drawings");
+        ui.label(RichText::new(format!("{count} drawing{}", if count == 1 { "" } else { "s" })).color(muted));
+        part_picker(ui, shell);
+    }
+    if let Some(l) = shell.editor.doc.find(id)
         && let LayerKind::Image(img) = &l.kind
     {
         ui.add_space(8.0);
@@ -240,6 +250,24 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
         }
         rig_health(ui, shell, id);
     }
+}
+
+/// Which sub-layer of a drawing the tools draw on.
+pub fn part_picker(ui: &mut egui::Ui, shell: &mut Shell) {
+    ui.horizontal(|ui| {
+        ui.label("Draw on");
+        for part in fanimate_core::Part::ALL {
+            let on = shell.editor.part == part;
+            if ui.selectable_label(on, part.label()).clicked() && !on {
+                shell.pending.push(fanimate_editor::Action::SetPart(part));
+            }
+        }
+    });
+    ui.label(
+        RichText::new("Roughs sit under everything and are left out of renders.")
+            .size(11.0)
+            .color(shell.palette.text_muted),
+    );
 }
 
 /// The rig health check for a bone layer and the layers inside it.

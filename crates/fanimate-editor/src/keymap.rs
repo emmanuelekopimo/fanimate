@@ -203,6 +203,7 @@ const FANIMATE: &[(&str, Action)] = &[
     ("F1", CommandPalette),
     // Layer
     ("Ctrl+Shift+N", NewVectorLayer),
+    ("Ctrl+Alt+N", NewFramesLayer),
     ("Ctrl+G", GroupLayers),
     ("Ctrl+Shift+G", Ungroup),
     ("Ctrl+CloseBracket", MoveLayerUp),
@@ -221,6 +222,7 @@ const FANIMATE: &[(&str, Action)] = &[
     ("Alt+Left", PrevKey),
     ("F6", AddKey),
     ("Shift+F6", DeleteKey),
+    ("F7", NewDrawing),
     // View
     ("Ctrl+Equals", ZoomIn),
     ("Ctrl+Plus", ZoomIn),

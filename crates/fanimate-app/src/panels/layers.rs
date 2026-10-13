@@ -64,6 +64,7 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
                 menus::item(ui, shell, Action::NewVectorLayer);
                 menus::item(ui, shell, Action::NewGroupLayer);
                 menus::item(ui, shell, Action::NewBoneLayer);
+                menus::item(ui, shell, Action::NewFramesLayer);
                 ui.separator();
                 menus::item(ui, shell, Action::Paste);
             });
@@ -86,6 +87,7 @@ fn toolbar(ui: &mut egui::Ui, shell: &mut Shell) {
             menus::item(ui, shell, Action::NewVectorLayer);
             menus::item(ui, shell, Action::NewGroupLayer);
             menus::item(ui, shell, Action::NewBoneLayer);
+            menus::item(ui, shell, Action::NewFramesLayer);
         });
         for (icon, action) in [
             (Icon::Duplicate, Action::Duplicate),
@@ -111,6 +113,7 @@ fn type_icon(kind: &LayerKind) -> Icon {
         LayerKind::Group { .. } => Icon::GroupLayer,
         LayerKind::Bone { .. } => Icon::BoneLayer,
         LayerKind::Image(_) => Icon::ImageLayer,
+        LayerKind::Frames { .. } => Icon::FramesLayer,
     }
 }
 

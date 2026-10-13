@@ -73,6 +73,7 @@ impl CanvasGpu {
                 layer: LayerId(0),
                 index: 0,
                 shape: std::borrow::Cow::Borrowed(shape),
+                part: None,
                 image: None,
                 transform: Affine2::IDENTITY,
                 opacity: 1.0,

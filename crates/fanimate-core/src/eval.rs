@@ -19,6 +19,9 @@ pub struct DrawItem<'a> {
     pub shape: Cow<'a, Shape>,
     /// For an image layer, the picture and its mesh.
     pub image: Option<ImageItem<'a>>,
+    /// For a drawing on a frame-by-frame layer, its sub-layer; `index` is
+    /// then the shape's index in that sub-layer.
+    pub part: Option<crate::frames::Part>,
     /// Shape space to document space.
     pub transform: Affine2,
     /// Combined opacity of the shape's layer and all its ancestors.
@@ -59,6 +62,8 @@ pub struct Evaluator {
     /// The bone layer whose action is being edited: its Smart Bones are not
     /// applied on top of the action's own keys.
     editing: Option<crate::scene::LayerId>,
+    /// Leave rough sketches out, as renders do.
+    pub skip_rough: bool,
 }
 
 /// The bone layer a subtree is inside.
@@ -106,33 +111,21 @@ impl Evaluator {
             match &layer.kind {
                 LayerKind::Vector { shapes } => {
                     for (index, shape) in shapes.iter().enumerate() {
-                        let skinned = rig.and_then(|(r, rel)| {
-                            let weights = shape.valid_skin()?;
-                            Some((&self.skins[r.depth][..], weights, rel))
-                        });
-                        let transform = match (rig, shape.bone, skinned) {
-                            (_, _, Some(_)) => world,
-                            (Some((r, rel)), Some(b), None) => match self.skins[r.depth].get(b) {
-                                Some(skin) => r.world * *skin * rel,
-                                None => world,
-                            },
-                            _ => world,
-                        };
-                        let mut drawn = at_frame(shape, frame);
-                        if let Some((r, _)) = rig {
-                            morph(&mut drawn, r.actions, &self.smart[r.depth], layer.id, index);
+                        let item = self.shape_item(layer.id, index, None, shape, frame, world, opacity, rig);
+                        out.push(item);
+                    }
+                }
+                LayerKind::Frames { cels } => {
+                    let Some(cel) = crate::frames::cel_at(cels, frame).map(|i| &cels[i]) else {
+                        continue;
+                    };
+                    for (part, index, shape) in cel.shapes() {
+                        if self.skip_rough && part == crate::frames::Part::Rough {
+                            continue;
                         }
-                        if let Some((skins, weights, rel)) = skinned {
-                            deform(drawn.to_mut(), skins, weights, rel);
-                        }
-                        out.push(DrawItem {
-                            layer: layer.id,
-                            index,
-                            shape: drawn,
-                            image: None,
-                            transform,
-                            opacity,
-                        });
+                        let item =
+                            self.shape_item(layer.id, index, Some(part), shape, frame, world, opacity, rig);
+                        out.push(item);
                     }
                 }
                 LayerKind::Group { children } => {
@@ -155,6 +148,7 @@ impl Evaluator {
                     out.push(DrawItem {
                         layer: layer.id,
                         index: 0,
+                        part: None,
                         shape: Cow::Owned(image_outline(&vertices, image.cells())),
                         image: Some(ImageItem {
                             media: &image.media,
@@ -220,6 +214,55 @@ impl Evaluator {
                     );
                 }
             }
+        }
+    }
+}
+
+impl Evaluator {
+    /// One shape of a vector layer or drawing, posed, morphed and deformed
+    /// for the frame.
+    #[allow(clippy::too_many_arguments)]
+    fn shape_item<'a>(
+        &self,
+        layer: crate::scene::LayerId,
+        index: usize,
+        part: Option<crate::frames::Part>,
+        shape: &'a Shape,
+        frame: f32,
+        world: Affine2,
+        opacity: f32,
+        rig: Option<(Rig<'a>, Affine2)>,
+    ) -> DrawItem<'a> {
+        let skinned = rig.and_then(|(r, rel)| {
+            let weights = shape.valid_skin()?;
+            Some((&self.skins[r.depth][..], weights, rel))
+        });
+        let transform = match (rig, shape.bone, skinned) {
+            (_, _, Some(_)) => world,
+            (Some((r, rel)), Some(b), None) => match self.skins[r.depth].get(b) {
+                Some(skin) => r.world * *skin * rel,
+                None => world,
+            },
+            _ => world,
+        };
+        let mut drawn = at_frame(shape, frame);
+        // Smart Bone actions reshape the shapes of vector layers
+        if let Some((r, _)) = rig
+            && part.is_none()
+        {
+            morph(&mut drawn, r.actions, &self.smart[r.depth], layer, index);
+        }
+        if let Some((skins, weights, rel)) = skinned {
+            deform(drawn.to_mut(), skins, weights, rel);
+        }
+        DrawItem {
+            layer,
+            index,
+            part,
+            shape: drawn,
+            image: None,
+            transform,
+            opacity,
         }
     }
 }
@@ -475,6 +518,29 @@ mod tests {
         assert_eq!(image.media, "media/x.png");
         assert!(items[0].shape.contains(Vec2::new(20.0, 10.0), 0.0));
         assert!(!items[0].shape.contains(Vec2::new(60.0, 10.0), 0.0));
+    }
+
+    #[test]
+    fn drawings_show_their_exposure_and_roughs_can_be_left_out() {
+        use crate::frames::{Cel, Part};
+        let mut doc = Document::new("t", 100.0, 100.0, 24.0);
+        let mut a = Cel::new(0);
+        a.line.push(square());
+        a.rough.push(square());
+        let mut b = Cel::new(6);
+        b.colour.push(square());
+        let layer = doc.new_layer("anim", LayerKind::Frames { cels: vec![a, b] });
+        doc.layers.push(layer);
+        let parts = |items: Vec<DrawItem>| items.iter().map(|i| i.part).collect::<Vec<_>>();
+        assert_eq!(parts(evaluate(&doc, 5.0)), [Some(Part::Rough), Some(Part::Line)]);
+        assert_eq!(parts(evaluate(&doc, 6.0)), [Some(Part::Colour)]);
+        let mut ev = Evaluator {
+            skip_rough: true,
+            ..Evaluator::default()
+        };
+        let mut out = Vec::new();
+        ev.evaluate_into(&doc, 0.0, &mut out);
+        assert_eq!(parts(out), [Some(Part::Line)]);
     }
 
     #[test]

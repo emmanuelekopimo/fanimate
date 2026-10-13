@@ -149,6 +149,18 @@ fn mark_bound(layers: &[Layer], used: &mut [bool]) {
                     }
                 }
             }
+            LayerKind::Frames { cels } => {
+                for (_, _, s) in cels.iter().flat_map(|c| c.shapes()) {
+                    if let Some(b) = s.bone {
+                        mark(used, b);
+                    }
+                    for w in s.skin.iter().flatten().flatten() {
+                        if w.1 > 0.0 {
+                            mark(used, w.0);
+                        }
+                    }
+                }
+            }
             LayerKind::Group { children } => mark_bound(children, used),
             LayerKind::Bone { .. } => {}
         }

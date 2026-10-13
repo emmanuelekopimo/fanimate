@@ -161,6 +161,20 @@ fn row(
     };
     let name = layer.name.clone();
     let visible = layer.visible;
+    // a frame-by-frame layer's drawings, as blocks across their exposure
+    let exposures: Vec<(Frame, Frame)> = match &layer.kind {
+        fanimate_core::LayerKind::Frames { cels } => cels
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                (
+                    c.frame,
+                    cels.get(i + 1).map_or(shell.editor.doc.end + 1, |n| n.frame),
+                )
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
     let label = crate::theme::label_color(layer.shown_label());
     let glyphs = key_glyphs(layer);
     let p = shell.palette;
@@ -184,8 +198,16 @@ fn row(
         pos2(x_of(start) - half, rect.top() + 4.0),
         pos2(x_of(end) + half, rect.bottom() - 4.0),
     );
-    ui.painter_at(keys.intersect(keys_clip))
-        .rect_filled(bar, 2.0, label.gamma_multiply(0.3));
+    let keys_painter = ui.painter_at(keys.intersect(keys_clip));
+    keys_painter.rect_filled(bar, 2.0, label.gamma_multiply(0.3));
+    for (i, (from, to)) in exposures.iter().enumerate() {
+        let block = Rect::from_min_max(
+            pos2(x_of(*from as f32) - half + 1.0, rect.top() + 3.0),
+            pos2(x_of(*to as f32) - half - 1.0, rect.bottom() - 3.0),
+        );
+        let shade = if i % 2 == 0 { 0.55 } else { 0.4 };
+        keys_painter.rect_filled(block, 2.0, label.gamma_multiply(shade));
+    }
     painter.hline(
         rect.x_range(),
         rect.bottom(),

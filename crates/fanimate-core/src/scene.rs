@@ -329,6 +329,11 @@ impl Layer {
         f(&self.transform.scale.keys);
         match &self.kind {
             LayerKind::Vector { shapes } => shapes.iter().for_each(|s| f(&s.path_keys)),
+            LayerKind::Frames { cels } => {
+                f(cels);
+                cels.iter()
+                    .for_each(|c| c.shapes().for_each(|(_, _, s)| f(&s.path_keys)));
+            }
             LayerKind::Bone { skeleton, .. } => skeleton.bones.iter().for_each(|b| f(&b.angle.keys)),
             LayerKind::Group { .. } | LayerKind::Image(_) => {}
         }
@@ -342,6 +347,12 @@ impl Layer {
         f(&mut self.transform.scale.keys);
         match &mut self.kind {
             LayerKind::Vector { shapes } => shapes.iter_mut().for_each(|s| f(&mut s.path_keys)),
+            LayerKind::Frames { cels } => {
+                for c in cels.iter_mut() {
+                    c.shapes_mut().for_each(|s| f(&mut s.path_keys));
+                }
+                f(cels);
+            }
             LayerKind::Bone { skeleton, .. } => skeleton.bones.iter_mut().for_each(|b| f(&mut b.angle.keys)),
             LayerKind::Group { .. } | LayerKind::Image(_) => {}
         }
@@ -372,6 +383,8 @@ pub enum LayerKind {
     },
     /// A picture, which bones can bend.
     Image(crate::media::Image),
+    /// Frame-by-frame drawings (see [`crate::frames`]).
+    Frames { cels: Vec<crate::frames::Cel> },
 }
 
 impl LayerKind {
@@ -381,14 +394,14 @@ impl LayerKind {
 
     pub fn children(&self) -> Option<&Vec<Layer>> {
         match self {
-            Self::Vector { .. } | Self::Image(_) => None,
+            Self::Vector { .. } | Self::Image(_) | Self::Frames { .. } => None,
             Self::Group { children } | Self::Bone { children, .. } => Some(children),
         }
     }
 
     pub fn children_mut(&mut self) -> Option<&mut Vec<Layer>> {
         match self {
-            Self::Vector { .. } | Self::Image(_) => None,
+            Self::Vector { .. } | Self::Image(_) | Self::Frames { .. } => None,
             Self::Group { children } | Self::Bone { children, .. } => Some(children),
         }
     }

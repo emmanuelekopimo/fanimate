@@ -43,6 +43,7 @@ pub enum Icon {
     History,
     Action,
     ImageLayer,
+    FramesLayer,
 }
 
 macro_rules! lucide {
@@ -106,6 +107,7 @@ impl Icon {
             Self::History => lucide!("history"),
             Self::Action => lucide!("clapperboard"),
             Self::ImageLayer => lucide!("image"),
+            Self::FramesLayer => lucide!("film"),
         }
     }
 }
@@ -244,6 +246,7 @@ mod tests {
             Icon::History,
             Icon::Action,
             Icon::ImageLayer,
+            Icon::FramesLayer,
         ]);
         icons
     }

@@ -21,6 +21,7 @@ mod construct;
 mod draw;
 mod import;
 mod points;
+mod shapes;
 pub use bones::BoneRef;
 pub use draw::DrawStyle;
 pub use points::PointRef;
@@ -116,6 +117,8 @@ pub struct Editor {
     bone: Option<BoneRef>,
     /// The bone gesture in progress.
     bone_drag: Option<bones::BoneDrag>,
+    /// The sub-layer the tools draw on in frame-by-frame layers.
+    pub part: fanimate_core::Part,
 }
 
 /// Retiming keys by dragging them on the timeline. The selected layers are
@@ -155,6 +158,7 @@ impl Editor {
             key_drag: None,
             bone: None,
             bone_drag: None,
+            part: fanimate_core::Part::default(),
         }
     }
 
@@ -271,6 +275,14 @@ impl Editor {
             NewAction => {
                 self.new_action(false);
             }
+            NewFramesLayer => self.new_layer(NewKind::Frames),
+            NewDrawing => {
+                self.new_drawing(false);
+            }
+            SetPart(p) => {
+                self.part = p;
+                self.points.clear();
+            }
             NewSmartBoneAction => {
                 self.new_action(true);
             }
@@ -366,6 +378,9 @@ impl Editor {
                 .actions_layer()
                 .is_some_and(|l| self.selected_bone().is_some_and(|b| b.layer == l)),
             FinishAction => self.editing_action().is_some(),
+            NewDrawing => self.primary().is_some_and(|id| {
+                matches!(self.doc.find(id).map(|l| &l.kind), Some(LayerKind::Frames { .. }))
+            }),
             EditAction(i) | InsertAction(i) | DeleteAction(i) => self
                 .actions_layer()
                 .is_some_and(|l| i < self.rig_actions(l).len()),
@@ -565,6 +580,7 @@ impl Editor {
         let (word, kind) = match kind {
             NewKind::Vector => ("Layer", LayerKind::vector(vec![])),
             NewKind::Group => ("Group", LayerKind::Group { children: vec![] }),
+            NewKind::Frames => ("Animation", LayerKind::Frames { cels: vec![] }),
             NewKind::Bone => (
                 "Bones",
                 LayerKind::Bone {
@@ -1019,6 +1035,19 @@ impl Editor {
         self.checkpoint("Add keyframe");
         let frame = self.current_frame();
         for id in roots {
+            // on a frame-by-frame layer a key is a drawing: a copy of the
+            // one showing, to change (Animate's F6)
+            if let Some(LayerKind::Frames { cels }) = self.doc.find_mut(id).map(|l| &mut l.kind) {
+                if !cels.iter().any(|c| c.frame == frame) {
+                    let mut cel = fanimate_core::frames::cel_at(cels, frame as f32)
+                        .map(|i| cels[i].clone())
+                        .unwrap_or_default();
+                    cel.frame = frame;
+                    let at = cels.partition_point(|c| c.frame < frame);
+                    cels.insert(at, cel);
+                }
+                continue;
+            }
             if let Some(l) = self.doc.find_mut(id) {
                 key_now(&mut l.transform.position, frame);
                 key_now(&mut l.transform.rotation, frame);
@@ -1197,6 +1226,7 @@ impl Editor {
 enum NewKind {
     Vector,
     Group,
+    Frames,
     Bone,
 }
 

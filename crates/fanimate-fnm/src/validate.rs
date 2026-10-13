@@ -239,37 +239,28 @@ impl Checker {
         match &mut layer.kind {
             LayerKind::Vector { shapes } => {
                 for (i, shape) in shapes.iter_mut().enumerate() {
-                    let problem = match (shape.bone, bones) {
-                        (None, _) => None,
-                        (Some(_), None) => {
-                            Some("is bound to a bone but is not inside a bone layer".to_owned())
-                        }
-                        (Some(b), Some(n)) if b >= n => {
-                            Some(format!("is bound to bone {b}, but the skeleton has {n}"))
-                        }
-                        (Some(_), Some(_)) => None,
-                    };
-                    if let Some(p) = problem {
-                        let sloc = format!("{loc} > shape {i} \"{}\"", shape.name);
-                        self.issue(
-                            Severity::Warning,
-                            &sloc,
-                            format!("{p}; it will not move with the rig"),
-                            true,
-                        );
-                        if self.repair {
-                            shape.bone = None;
-                        }
-                    }
-                    if shape.path.points().any(|p| !p.is_finite()) {
-                        let sloc = format!("{loc} > shape {i} \"{}\"", shape.name);
-                        self.issue(Severity::Error, &sloc, "path has non-finite points".into(), false);
-                    }
                     let sloc = format!("{loc} > shape {i} \"{}\"", shape.name);
-                    self.widths(shape, &sloc);
-                    self.path_keys(shape, &sloc, end);
-                    self.skin(shape, &sloc, bones);
+                    self.shape(shape, &sloc, end, bones);
                 }
+            }
+            LayerKind::Frames { cels } => {
+                let mut cels_keys = std::mem::take(cels);
+                self.cels(&mut cels_keys, &loc);
+                for cel in &mut cels_keys {
+                    let at = cel.frame;
+                    for part in fanimate_core::Part::ALL {
+                        for (i, shape) in cel.part_mut(part).iter_mut().enumerate() {
+                            let sloc = format!(
+                                "{loc} > drawing on frame {} > {} shape {i} \"{}\"",
+                                at,
+                                part.label(),
+                                shape.name
+                            );
+                            self.shape(shape, &sloc, end, bones);
+                        }
+                    }
+                }
+                *cels = cels_keys;
             }
             LayerKind::Group { children } => {
                 for child in children {
@@ -388,6 +379,70 @@ impl Checker {
                         *w = 1.0;
                     } else if *w < 0.0 {
                         *w = 0.0;
+                    }
+                }
+            }
+        }
+    }
+
+    /// A shape: its bone binding, points, width profile, point keys and
+    /// weights.
+    fn shape(&mut self, shape: &mut fanimate_core::Shape, sloc: &str, end: i32, bones: Option<usize>) {
+        let problem = match (shape.bone, bones) {
+            (None, _) => None,
+            (Some(_), None) => Some("is bound to a bone but is not inside a bone layer".to_owned()),
+            (Some(b), Some(n)) if b >= n => Some(format!("is bound to bone {b}, but the skeleton has {n}")),
+            (Some(_), Some(_)) => None,
+        };
+        if let Some(p) = problem {
+            self.issue(
+                Severity::Warning,
+                sloc,
+                format!("{p}; it will not move with the rig"),
+                true,
+            );
+            if self.repair {
+                shape.bone = None;
+            }
+        }
+        if shape.path.points().any(|p| !p.is_finite()) {
+            self.issue(Severity::Error, sloc, "path has non-finite points".into(), false);
+        }
+        self.widths(shape, sloc);
+        self.path_keys(shape, sloc, end);
+        self.skin(shape, sloc, bones);
+    }
+
+    /// Drawings: on frames that are not negative, in order, one per frame.
+    fn cels(&mut self, cels: &mut Vec<fanimate_core::Cel>, loc: &str) {
+        let negative = cels.iter().filter(|c| c.frame < 0).count();
+        if negative > 0 {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!("{negative} drawing(s) on negative frames; they are removed"),
+                true,
+            );
+            if self.repair {
+                cels.retain(|c| c.frame >= 0);
+            }
+        }
+        let sorted = cels.windows(2).all(|w| w[0].frame < w[1].frame);
+        if !sorted {
+            self.issue(
+                Severity::Error,
+                loc,
+                "drawings are out of order or share a frame".into(),
+                true,
+            );
+            if self.repair {
+                // stable: of drawings on one frame, the later in the file wins
+                cels.sort_by_key(|c| c.frame);
+                let taken = std::mem::take(cels);
+                for c in taken {
+                    match cels.last_mut() {
+                        Some(last) if last.frame == c.frame => *last = c,
+                        _ => cels.push(c),
                     }
                 }
             }
@@ -897,6 +952,35 @@ mod tests {
                 .iter()
                 .any(|i| i.severity == Severity::Warning)
         );
+    }
+
+    #[test]
+    fn drawings_are_checked_and_repaired() {
+        use fanimate_core::{Cel, Path, Shape, Style, Vec2};
+        let mut doc = rigged();
+        let mut a = Cel::new(5);
+        let mut bad = Shape::new(
+            "s",
+            Path::new().move_to(Vec2::ZERO).line_to(Vec2::X),
+            Style::default(),
+        );
+        bad.widths = Some(vec![1.0]);
+        a.line.push(bad);
+        let layer = doc.new_layer(
+            "anim",
+            LayerKind::Frames {
+                cels: vec![a, Cel::new(-1), Cel::new(2)],
+            },
+        );
+        doc.layers.push(layer);
+        let report = validate(&doc);
+        assert_eq!(report.unresolved_errors().count(), 3, "{report}");
+        repair(&mut doc);
+        assert!(validate(&doc).is_clean(), "{}", validate(&doc));
+        let LayerKind::Frames { cels } = &doc.layers.last().unwrap().kind else {
+            unreachable!()
+        };
+        assert_eq!(cels.iter().map(|c| c.frame).collect::<Vec<_>>(), [2, 5]);
     }
 
     #[test]

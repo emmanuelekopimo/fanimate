@@ -94,7 +94,7 @@ Each file in `layers/` holds one top-level layer. Child layers of groups and bon
 | `visible` | boolean | Optional, default `true` |
 | `opacity` | [channel](#channels) of number | 0 to 1. Multiplies with ancestors' opacity. |
 | `transform` | object | `position` (channel of [vector](#vectors)), `rotation` (channel of number, radians), `scale` (channel of vector) |
-| `type` | string | `"vector"`, `"group"`, `"bone"` or `"image"` (version 3); decides the remaining fields |
+| `type` | string | `"vector"`, `"group"`, `"bone"`, `"image"` or `"frames"` (both version 3); decides the remaining fields |
 
 A layer's transform applies scale, then rotation, then position, relative to its parent.
 
@@ -109,6 +109,25 @@ A layer's transform applies scale, then rotation, then position, relative to its
 | Field | Type | Meaning |
 |---|---|---|
 | `children` | array of layers | Drawn first to last |
+
+### `"type": "frames"`
+
+Frame-by-frame animation: a list of drawings, each shown from its frame until the next drawing's frame (its exposure). Version 3.
+
+```json
+{"type": "frames", "cels": [
+  {"frame": 0, "line": [], "colour": []},
+  {"frame": 4, "rough": [], "line": []}
+]}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `cels` | array | Drawings, sorted by `frame`, at most one per frame, no negative frames. |
+| `cels[].frame` | integer | The first frame the drawing is shown on |
+| `cels[].rough`, `.colour`, `.line`, `.overlay` | arrays of [shapes](#shapes) | Optional. The drawing's sub-layers, drawn in that order (rough at the bottom). Renders leave `rough` out. |
+
+Nothing is shown before the first drawing. Shapes in drawings may be bound to bones like any shape.
 
 ### `"type": "image"`
 
@@ -356,6 +375,8 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | `skin` outside any bone layer | Warning | Remove the skin |
 | Bone `limits` not a finite range with min ≤ max | Error | Remove the limits |
 | Bone `strength` not a positive number | Warning | Use the default |
+| Drawings on negative frames | Error | Remove them |
+| Drawings out of order or two on one frame | Error | Sort; of two on one frame, keep the later in the file |
 | Image `media` name outside the `media` folder | Error | None; the picture is not read |
 | Image picture file missing | Warning | None; drawn as a grey placeholder |
 | Image size not positive | Error | Set to 100 × 100 |
@@ -382,4 +403,4 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | 0 | Fanimate 0.0.1 | First version: layers, shapes, bones, channels | |
 | 1 | Development builds after Fanimate 0.0.5 (never released) | Shapes may have a stroke width profile (`widths`), written by the brush | Version 0 files need no conversion. A version 0 reader would ignore `widths` and draw brush strokes at one width, so the version was bumped. |
 | 2 | Fanimate 0.0.6 | Shapes may have point keyframes (`path_keys`) | Older files need no conversion. An older reader would ignore `path_keys` and draw animated drawings without their animation, so the version was bumped. |
-| 3 | Fanimate 0.0.7 | Layers may have a label colour (`label`); bones may have `limits`, `pinned` and `strength`; shapes may have a smooth binding (`skin`); bone layers may have actions and Smart Bone actions; image layers and the `media` folder | Older files need no conversion. An older reader would drop labels and draw smoothly bound artwork unbound, so the version was bumped. |
+| 3 | Fanimate 0.0.7 | Layers may have a label colour (`label`); bones may have `limits`, `pinned` and `strength`; shapes may have a smooth binding (`skin`); bone layers may have actions and Smart Bone actions; image layers and the `media` folder; frame-by-frame layers | Older files need no conversion. An older reader would drop labels and draw smoothly bound artwork unbound, so the version was bumped. |

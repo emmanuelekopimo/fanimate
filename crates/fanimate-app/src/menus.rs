@@ -152,6 +152,7 @@ pub fn layer(ui: &mut egui::Ui, shell: &mut Shell) {
         shell,
         &[
             Action::NewVectorLayer,
+            Action::NewFramesLayer,
             Action::NewGroupLayer,
             Action::NewBoneLayer,
         ],
@@ -195,7 +196,11 @@ pub fn animation(ui: &mut egui::Ui, shell: &mut Shell) {
         ],
     );
     ui.separator();
-    items(ui, shell, &[Action::AddKey, Action::DeleteKey]);
+    items(
+        ui,
+        shell,
+        &[Action::AddKey, Action::DeleteKey, Action::NewDrawing],
+    );
     interpolation_items(ui, shell);
     ui.separator();
     items(
@@ -325,6 +330,7 @@ pub fn layer_context(ui: &mut egui::Ui, shell: &mut Shell) {
                 Action::NewVectorLayer,
                 Action::NewGroupLayer,
                 Action::NewBoneLayer,
+                Action::NewFramesLayer,
             ],
         );
     });
