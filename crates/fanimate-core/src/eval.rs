@@ -77,6 +77,15 @@ struct Rig<'a> {
 }
 
 impl Evaluator {
+    /// An evaluator for renders: it leaves out rough sketches, which are
+    /// for the animator.
+    pub fn for_render() -> Self {
+        Self {
+            skip_rough: true,
+            ..Self::default()
+        }
+    }
+
     pub fn evaluate_into<'a>(&mut self, doc: &'a Document, frame: f32, out: &mut Vec<DrawItem<'a>>) {
         out.clear();
         self.editing = doc.action_edit.as_ref().map(|e| e.layer);
@@ -534,10 +543,7 @@ mod tests {
         let parts = |items: Vec<DrawItem>| items.iter().map(|i| i.part).collect::<Vec<_>>();
         assert_eq!(parts(evaluate(&doc, 5.0)), [Some(Part::Rough), Some(Part::Line)]);
         assert_eq!(parts(evaluate(&doc, 6.0)), [Some(Part::Colour)]);
-        let mut ev = Evaluator {
-            skip_rough: true,
-            ..Evaluator::default()
-        };
+        let mut ev = Evaluator::for_render();
         let mut out = Vec::new();
         ev.evaluate_into(&doc, 0.0, &mut out);
         assert_eq!(parts(out), [Some(Part::Line)]);
