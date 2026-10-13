@@ -8,7 +8,7 @@ Fanimate is a free, open-source 2D character animation app. It keeps what animat
 
 **One-line pitch:** Moho's rigging, Harmony's drawing and pipeline, Animate's ease of use. Free, on every platform, with nothing locked away.
 
-**Where we are:** Phase 1 (Foundation). M1 (engine spike) is done on Windows, waiting only for macOS and Linux benchmark numbers on the [reference hardware](docs/reference-hardware.md). M2 (Draw) and M3 (Rig) are built: drawing, point and pen tools, booleans, point keyframes, timeline key editing, per-layer undo history, crash recovery, bones with IK, smooth binding, Smart Bones, actions, image layers and PSD import are in; their exit checks with testers remain. Status lives in the "Status" section of [docs/roadmap/phase-1.md](docs/roadmap/phase-1.md). Update that section when you finish milestone work.
+**Where we are:** Phase 1 (Foundation). M1 (engine spike) is done on Windows, waiting only for macOS and Linux benchmark numbers on the [reference hardware](docs/reference-hardware.md). M2 (Draw), M3 (Rig) and M4 (Frame-by-frame and voice) are built: drawing, point and pen tools, booleans, point keyframes, timeline key editing, per-layer undo history, crash recovery, bones with IK, smooth binding, Smart Bones, actions, image layers and PSD import, frame-by-frame layers, onion skin, the X-sheet, switch and audio layers, lip sync, SVG import and video export through the render queue are in; their exit checks with testers remain. Status lives in the "Status" section of [docs/roadmap/phase-1.md](docs/roadmap/phase-1.md). Update that section when you finish milestone work.
 
 ### Read these before non-trivial work
 

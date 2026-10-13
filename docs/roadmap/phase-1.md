@@ -6,7 +6,7 @@ Companion to the [product vision](../product-vision.md). The brand assets propos
 
 ## Status
 
-*Updated 13 October 2026. Target dates for each milestone are in [section 4](#4-milestones).*
+*Updated 13 October 2026 (M4 built). Target dates for each milestone are in [section 4](#4-milestones).*
 
 | Milestone | Status |
 |---|---|
@@ -14,7 +14,8 @@ Companion to the [product vision](../product-vision.md). The brand assets propos
 | M1: Engine spike | **Done on Windows**; macOS and Linux measurements outstanding |
 | M2: Draw | **Built**; the usability pass with an artist and the exit check are outstanding |
 | M3: Rig | **Built**; the exit check (a character from a PSD rigged by a tester) and the reference-hardware benchmark are outstanding |
-| M4 to M6 | Not started |
+| M4: Frame-by-frame and voice | **Built**; the exit check (a hand-drawn cycle and a lip-synced line exported to MP4 by a tester) is outstanding |
+| M5 and M6 | Not started |
 
 ### M0: Ground work (done)
 
@@ -112,6 +113,27 @@ Not in M3, and why:
 - **Rig templates, retargeting and physics** (WS5) are left for later: templates need artwork and testers, and the roadmap allows physics to slip first. They are not part of the M3 exit check.
 - **Per-limb FK/IK blending**: posing uses IK interactively and stores ordinary keys, which is how Moho animators work; a stored IK target that blends with FK can follow if testers ask for it.
 - **Weighted PSD rigs in other tools' formats** wait for the M5 importers.
+
+### M4: Frame-by-frame and voice (built; exit check outstanding)
+
+Exit check: a hand-drawn cycle and a lip-synced line are exported to MP4.
+
+- [x] Frame-by-frame layers: a drawing per exposure, each with rough, colour, line and overlay sub-layers (renders leave out the rough); New Drawing (F7) copies the drawing on show, and the timeline shows exposures as blocks ([spec](../spec/fnm.md#type-frames))
+- [x] Onion skin (Alt+O): earlier and later drawings or frames tinted in two colours, with how many, keys only or every frame, and selected or all layers, remembered between sessions
+- [x] Light table (Alt+L): every layer but the selected ones fades
+- [x] X-sheet panel beside the Timeline: frames down the page, a column per layer, drawing numbers with their holds, switch layers as a mouth chart, key marks; click to go to a frame, right-click for drawing and key commands
+- [x] Switch layers: one child shown at a time, chosen by name on keys from the layer and key menus or Properties; the timeline names each key's choice ([spec](../spec/fnm.md#type-switch))
+- [x] Audio layers: WAV import (File › Import), start frame and volume in Properties, playback in time with the timeline, waveforms in the timeline ([spec](../spec/fnm.md#type-audio))
+- [x] Lip sync from sound: Rhubarb Lip Sync, shipped with Fanimate, listens to the dialogue in the background (no console window) and keys the selected switch layer in one undo step; mouths can be named after Rhubarb's letters or the Preston Blair set
+- [x] SVG import: each top-level group (Inkscape and Illustrator layers) becomes a vector layer; outlines, solid colours, opacity, line widths and transforms come through, even-odd fills are refitted, and the status says what was simplified or left out (text, pictures, gradients, clips, masks, filters)
+- [x] Video export v1: File › Export Video (Ctrl+Shift+R) to MP4 or MKV (H.264 with the project's sound as AAC), animated GIF or PNG sequence, at any size and frame range. Renders run in the render queue, a window of its own process that keeps going when the editor closes, with progress, cancel, render again and reordering (drag, arrows or right-click). `fanimate-cli export` does the same headless. FFmpeg ships as a separate program built from published sources ([legal note](../legal/video-export.md))
+- [ ] Exit check with a tester
+- [ ] Legal sign-off on the codec approach and the H.264 patent question ([review scope](../legal/review-scope.md), section 4)
+
+Not in M4, and why:
+
+- **AV1 and WebM export**: royalty-free, and recommended as an option in the legal note, but they need another encoder in the FFmpeg build. MP4 and MKV with H.264 cover the exit check.
+- **Other sound formats** (MP3, OGG): WAV is what Rhubarb reads and what dialogue recording tools produce; others can follow.
 
 ### First 30 days checklist (section 7)
 
