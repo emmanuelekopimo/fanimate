@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use fanimate_core::anim::Animatable;
 use fanimate_core::bones::Skeleton;
 use fanimate_core::{
-    Affine2, Channel, Document, Frame, Interpolation, Layer, LayerId, LayerKind, Transform, samples,
+    Affine2, Channel, Document, Frame, Interpolation, Label, Layer, LayerId, LayerKind, Transform, samples,
 };
 use fanimate_fnm::{FnmError, HistoryRecord, Report};
 use serde::{Deserialize, Serialize};
@@ -152,7 +152,7 @@ impl Editor {
     pub fn untitled() -> Self {
         let mut doc = Document::new("Untitled", 1280.0, 720.0, 24.0);
         doc.end = 119;
-        let layer = doc.new_layer("Layer 1", LayerKind::vector(vec![]));
+        let layer = labelled(doc.new_layer("Layer 1", LayerKind::vector(vec![])));
         let id = layer.id;
         doc.layers.push(layer);
         let mut ed = Self::new(doc);
@@ -267,6 +267,7 @@ impl Editor {
             SelectAll => self.select_all(),
             SelectNone => self.selection.clear(),
             Rename => self.rename_request = self.primary(),
+            SetLabel(label) => self.set_label(label),
             NewVectorLayer => self.new_layer(NewKind::Vector),
             NewGroupLayer => self.new_layer(NewKind::Group),
             NewBoneLayer => self.new_layer(NewKind::Bone),
@@ -315,6 +316,7 @@ impl Editor {
             Cut | Copy | Duplicate | Delete | GroupLayers | MoveLayerUp | MoveLayerDown
             | ToggleVisibility | AddKey | DeleteKey => has_sel,
             Rename | LayerProperties => self.primary().is_some(),
+            SetLabel(_) => has_sel,
             Paste => self.clipboard.is_some(),
             FinishPath => self.is_drawing_path(),
             Union | Subtract | Intersect => self.can_combine(),
@@ -520,7 +522,7 @@ impl Editor {
             ),
         };
         let name = self.unused_name(word);
-        let layer = self.doc.new_layer(name, kind);
+        let layer = labelled(self.doc.new_layer(name, kind));
         let id = layer.id;
         let (parent, index) = self.insertion_point();
         self.doc.insert(parent, index, layer);
@@ -709,7 +711,7 @@ impl Editor {
             }
         }
         let name = self.unused_name("Group");
-        let group = self.doc.new_layer(name, LayerKind::Group { children });
+        let group = labelled(self.doc.new_layer(name, LayerKind::Group { children }));
         let gid = group.id;
         self.doc.insert(parent, index - removed_below, group);
         self.selection = vec![gid];
@@ -857,6 +859,25 @@ impl Editor {
         self.checkpoint("Rename");
         if let Some(l) = self.doc.find_mut(id) {
             l.name = name.to_owned();
+        }
+    }
+
+    /// Give the selected layers a label colour.
+    fn set_label(&mut self, label: Label) {
+        let ids: Vec<LayerId> = self
+            .selection
+            .iter()
+            .copied()
+            .filter(|id| self.doc.find(*id).is_some_and(|l| l.label != Some(label)))
+            .collect();
+        if ids.is_empty() {
+            return;
+        }
+        self.checkpoint("Label colour");
+        for id in ids {
+            if let Some(l) = self.doc.find_mut(id) {
+                l.label = Some(label);
+            }
         }
     }
 
@@ -1125,6 +1146,13 @@ enum NewKind {
     Vector,
     Group,
     Bone,
+}
+
+/// A new layer with its own label colour, the next in turn, so it is saved
+/// with the project and stays when layers are reordered.
+pub(crate) fn labelled(mut layer: Layer) -> Layer {
+    layer.label = Some(Label::for_id(layer.id));
+    layer
 }
 
 fn plural(n: usize) -> &'static str {
@@ -1519,6 +1547,25 @@ mod tests {
         assert_eq!(names(&back), ["A1", "B", "C"]);
         back.run(Action::GoToHistory(0));
         assert_eq!(names(&back), ["A", "B", "C"]);
+    }
+
+    #[test]
+    fn new_layers_get_labels_in_turn_and_labels_can_be_changed() {
+        let (mut ed, [a, ..]) = three();
+        ed.select(a, SelectMode::Replace);
+        ed.run(Action::NewVectorLayer);
+        let first = ed.primary().unwrap();
+        ed.run(Action::NewVectorLayer);
+        let second = ed.primary().unwrap();
+        let label = |ed: &Editor, id| ed.doc.find(id).unwrap().label;
+        assert!(label(&ed, first).is_some());
+        assert_ne!(label(&ed, first), label(&ed, second));
+        ed.select(first, SelectMode::Toggle);
+        ed.run(Action::SetLabel(Label::Blue));
+        assert_eq!(label(&ed, first), Some(Label::Blue));
+        assert_eq!(label(&ed, second), Some(Label::Blue));
+        ed.run(Action::Undo);
+        assert_ne!(label(&ed, second), Some(Label::Blue));
     }
 
     #[test]

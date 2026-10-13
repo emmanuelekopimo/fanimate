@@ -1,6 +1,6 @@
 # The `.fnm` project format
 
-**Current version: 2. Status: draft.** The format may still change before Fanimate 1.0, but every change that older readers would misread bumps the version, and Fanimate always opens files written by earlier versions. See [Version history](#version-history).
+**Current version: 3. Status: draft.** The format may still change before Fanimate 1.0, but every change that older readers would misread bumps the version, and Fanimate always opens files written by earlier versions. See [Version history](#version-history).
 
 The reference implementation is the [`fanimate-fnm`](../../crates/fanimate-fnm/) crate.
 
@@ -35,7 +35,7 @@ Identifies the folder as a Fanimate project.
 ```json
 {
   "format": "fnm",
-  "version": 2,
+  "version": 3,
   "generator": "fanimate 0.0.6"
 }
 ```
@@ -84,6 +84,7 @@ Each file in `layers/` holds one top-level layer. Child layers of groups and bon
 |---|---|---|
 | `id` | integer | Unique within the project; stable for the layer's life |
 | `name` | string | Display name |
+| `label` | string | Optional (version 3). Label colour: `"red"`, `"orange"`, `"yellow"`, `"lime"`, `"green"`, `"teal"`, `"cyan"`, `"blue"`, `"violet"` or `"pink"`. Without it, Fanimate shows the colour at position `id` mod 10 in that list. Readers ignore names they do not know. |
 | `visible` | boolean | Optional, default `true` |
 | `opacity` | [channel](#channels) of number | 0 to 1. Multiplies with ancestors' opacity. |
 | `transform` | object | `position` (channel of [vector](#vectors)), `rotation` (channel of number, radians), `scale` (channel of vector) |
@@ -296,3 +297,4 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | 0 | Fanimate 0.0.1 | First version: layers, shapes, bones, channels | |
 | 1 | Development builds after Fanimate 0.0.5 (never released) | Shapes may have a stroke width profile (`widths`), written by the brush | Version 0 files need no conversion. A version 0 reader would ignore `widths` and draw brush strokes at one width, so the version was bumped. |
 | 2 | Fanimate 0.0.6 | Shapes may have point keyframes (`path_keys`) | Older files need no conversion. An older reader would ignore `path_keys` and draw animated drawings without their animation, so the version was bumped. |
+| 3 | Fanimate 0.0.7 | Layers may have a label colour (`label`) | Older files need no conversion. An older reader would drop labels when saving, so the version was bumped. |

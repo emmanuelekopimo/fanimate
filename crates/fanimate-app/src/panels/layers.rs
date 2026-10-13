@@ -117,11 +117,12 @@ fn row(ui: &mut egui::Ui, shell: &mut Shell, id: LayerId, depth: usize) {
     let Some(layer) = shell.editor.doc.find(id) else {
         return;
     };
-    let (name, visible, is_container, kind_icon) = (
+    let (name, visible, is_container, kind_icon, label) = (
         layer.name.clone(),
         layer.visible,
         layer.kind.children().is_some(),
         type_icon(&layer.kind),
+        layer.shown_label(),
     );
     let collapsed = shell.editor.collapsed.contains(&id);
     let selected = shell.editor.is_selected(id);
@@ -154,8 +155,15 @@ fn row(ui: &mut egui::Ui, shell: &mut Shell, id: LayerId, depth: usize) {
         shell.editor.set_visible(id, !visible);
     }
 
+    // label colour swatch
+    let swatch = Rect::from_center_size(
+        egui::pos2(eye_rect.right() + 8.0, rect.center().y),
+        egui::vec2(10.0, 10.0),
+    );
+    painter.rect_filled(swatch, 2.0, crate::theme::label_color(label));
+
     // expand arrow for groups and bone layers
-    let x0 = eye_rect.right() + 4.0 + depth as f32 * INDENT;
+    let x0 = swatch.right() + 4.0 + depth as f32 * INDENT;
     let arrow_rect = Rect::from_min_size(egui::pos2(x0, rect.top()), egui::vec2(16.0, ROW_HEIGHT));
     if is_container {
         let arrow = ui.interact(arrow_rect, Id::new(("arrow", id)), Sense::click());

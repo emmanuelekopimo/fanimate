@@ -9,9 +9,9 @@ const INTER: &[u8] = include_bytes!("../../../brand/fonts/Inter-Variable.ttf");
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Theme {
-    #[default]
     Night,
     Day,
+    #[default]
     StudioGrey,
     HighContrast,
 }
@@ -57,6 +57,25 @@ pub struct Palette {
     pub success: Color32,
     pub error: Color32,
     pub dark: bool,
+}
+
+/// A layer label's colour, from the brand tokens.
+pub fn label_color(label: fanimate_core::Label) -> Color32 {
+    use fanimate_core::Label;
+    static COLORS: std::sync::OnceLock<Vec<Color32>> = std::sync::OnceLock::new();
+    let colors = COLORS.get_or_init(|| {
+        let tokens: serde_json::Value = serde_json::from_str(TOKENS).expect("tokens.json is valid JSON");
+        Label::ALL
+            .iter()
+            .map(|l| {
+                hex(tokens["labels"][l.name().to_lowercase()]
+                    .as_str()
+                    .unwrap_or("#FF00FF"))
+            })
+            .collect()
+    });
+    let i = Label::ALL.iter().position(|l| *l == label).unwrap_or(0);
+    colors[i]
 }
 
 fn hex(s: &str) -> Color32 {
@@ -193,4 +212,16 @@ pub fn menu_style(style: &mut egui::Style) {
     style.spacing.button_padding = egui::vec2(10.0, 4.0);
     style.spacing.item_spacing.y = 1.0;
     style.spacing.menu_margin = egui::Margin::same(4);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_label_has_a_colour() {
+        for label in fanimate_core::Label::ALL {
+            assert_ne!(label_color(label), Color32::from_rgb(0xFF, 0, 0xFF), "{label:?}");
+        }
+    }
 }

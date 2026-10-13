@@ -323,7 +323,7 @@ impl Editor {
     /// A new, empty vector layer for drawing on, selected.
     fn new_drawing_layer(&mut self) -> LayerId {
         let name = self.unused_name("Layer");
-        let layer = self.doc.new_layer(name, LayerKind::vector(vec![]));
+        let layer = super::labelled(self.doc.new_layer(name, LayerKind::vector(vec![])));
         let id = layer.id;
         let (parent, index) = match self.primary().and_then(|p| self.doc.find(p)) {
             Some(p) if p.kind.children().is_some() => (Some(p.id), p.kind.children().map_or(0, Vec::len)),

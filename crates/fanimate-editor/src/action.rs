@@ -44,6 +44,8 @@ pub enum Action {
     MoveLayerDown,
     ToggleVisibility,
     LayerProperties,
+    /// Give the selected layers this label colour.
+    SetLabel(fanimate_core::Label),
     // Animation
     PlayPause,
     NextFrame,
@@ -106,6 +108,7 @@ impl Action {
             MoveLayerDown => "Move Layer Down",
             ToggleVisibility => "Show/Hide Layer",
             LayerProperties => "Layer Properties",
+            SetLabel(l) => l.name(),
             PlayPause => "Play/Pause",
             NextFrame => "Next Frame",
             PrevFrame => "Previous Frame",

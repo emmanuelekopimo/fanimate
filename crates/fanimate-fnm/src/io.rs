@@ -17,7 +17,9 @@ pub const FORMAT_NAME: &str = "fnm";
 ///   brush. Version 0 files need no conversion.
 /// - 2: shapes may carry point keyframes (`path_keys`). Older files need
 ///   no conversion.
-pub const FORMAT_VERSION: u32 = 2;
+/// - 3: layers may carry a label colour (`label`). Older files need no
+///   conversion; their layers are shown with a colour picked by id.
+pub const FORMAT_VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Manifest {
@@ -354,6 +356,19 @@ mod tests {
         shape.key_path(12, squashed, Interpolation::Linear);
         let layer = doc.new_layer("Blob", LayerKind::vector(vec![shape]));
         doc.layers.push(layer);
+        save(&doc, &path).unwrap();
+        let (loaded, report) = load(&path).unwrap();
+        assert!(report.is_clean(), "{report}");
+        assert_eq!(loaded, doc);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn labels_round_trip() {
+        let dir = temp_dir("labels");
+        let path = dir.join("p.fnm");
+        let mut doc = samples::hello();
+        doc.layers[0].label = Some(fanimate_core::Label::Pink);
         save(&doc, &path).unwrap();
         let (loaded, report) = load(&path).unwrap();
         assert!(report.is_clean(), "{report}");

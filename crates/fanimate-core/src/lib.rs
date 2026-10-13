@@ -28,5 +28,5 @@ pub use color::Color;
 pub use eval::{DrawItem, evaluate};
 pub use glam::{Affine2, Vec2};
 pub use path::{Path, PathCmd, Shape, Stroke, Style};
-pub use scene::{Document, Layer, LayerId, LayerKind};
+pub use scene::{Document, Label, Layer, LayerId, LayerKind};
 pub use transform::{AnimTransform, Transform};

@@ -160,6 +160,7 @@ fn row(
     };
     let name = layer.name.clone();
     let visible = layer.visible;
+    let label = crate::theme::label_color(layer.shown_label());
     let glyphs = key_glyphs(layer);
     let p = shell.palette;
     let selected = shell.editor.is_selected(id);
@@ -172,6 +173,18 @@ fn row(
     if selected {
         painter.rect_filled(rect, 0.0, p.accent.gamma_multiply(0.2));
     }
+    // the layer's label colour: a strip by the name, and a bar across the
+    // frame range, as in compositing apps; keys are drawn on top
+    let strip = Rect::from_min_size(rect.min, vec2(3.0, rect.height()));
+    painter.rect_filled(strip, 0.0, label);
+    let half = (x_of(1.0) - x_of(0.0)) / 2.0;
+    let (start, end) = (shell.editor.doc.start as f32, shell.editor.doc.end as f32);
+    let bar = Rect::from_min_max(
+        pos2(x_of(start) - half, rect.top() + 4.0),
+        pos2(x_of(end) + half, rect.bottom() - 4.0),
+    );
+    ui.painter_at(keys.intersect(keys_clip))
+        .rect_filled(bar, 2.0, label.gamma_multiply(0.3));
     painter.hline(
         rect.x_range(),
         rect.bottom(),

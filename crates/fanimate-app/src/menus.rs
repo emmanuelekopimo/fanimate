@@ -167,6 +167,7 @@ pub fn layer(ui: &mut egui::Ui, shell: &mut Shell) {
             Action::MoveLayerDown,
         ],
     );
+    label_menu(ui, shell);
     ui.separator();
     item(ui, shell, Action::LayerProperties);
 }
@@ -266,6 +267,36 @@ pub fn help(ui: &mut egui::Ui, shell: &mut Shell) {
     }
 }
 
+/// Label colours for the selected layers, each with its swatch.
+pub fn label_menu(ui: &mut egui::Ui, shell: &mut Shell) {
+    let enabled = shell.editor.can_run(Action::SetLabel(fanimate_core::Label::Red));
+    ui.add_enabled_ui(enabled, |ui| {
+        ui.menu_button("Label Colour", |ui| {
+            ui.set_min_width(MENU_MIN_WIDTH);
+            let current = shell
+                .editor
+                .primary()
+                .and_then(|id| shell.editor.doc.find(id))
+                .map(|l| l.shown_label());
+            for label in fanimate_core::Label::ALL {
+                let button = egui::Button::new(label.name()).selected(current == Some(label));
+                let response = ui.add(button);
+                let r = response.rect;
+                let square = egui::Rect::from_center_size(
+                    egui::pos2(r.right() - 14.0, r.center().y),
+                    egui::vec2(10.0, 10.0),
+                );
+                ui.painter()
+                    .rect_filled(square, 2.0, crate::theme::label_color(label));
+                if response.clicked() {
+                    shell.pending.push(Action::SetLabel(label));
+                    ui.close();
+                }
+            }
+        });
+    });
+}
+
 /// Right-click menu contents for layers (Layers panel rows and the canvas).
 pub fn layer_context(ui: &mut egui::Ui, shell: &mut Shell) {
     ui.menu_button("New", |ui| {
@@ -304,6 +335,7 @@ pub fn layer_context(ui: &mut egui::Ui, shell: &mut Shell) {
             Action::MoveLayerDown,
         ],
     );
+    label_menu(ui, shell);
     ui.separator();
     items(ui, shell, &[Action::AddKey, Action::DeleteKey]);
     ui.separator();

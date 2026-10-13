@@ -33,7 +33,7 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             keymap: KeymapKind::Fanimate.id().into(),
-            theme: Theme::Night,
+            theme: Theme::default(),
             welcome_done: false,
             draw: DrawStyle::default(),
         }

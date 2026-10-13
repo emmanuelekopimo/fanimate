@@ -197,10 +197,79 @@ impl Document {
     }
 }
 
+/// A layer's label colour, as in the Layers panel and on its timeline row,
+/// so related layers are easy to find. The colours themselves come from the
+/// brand tokens; only the name is stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Label {
+    Red,
+    Orange,
+    Yellow,
+    Lime,
+    Green,
+    Teal,
+    Cyan,
+    Blue,
+    Violet,
+    Pink,
+}
+
+impl Label {
+    pub const ALL: [Label; 10] = [
+        Self::Red,
+        Self::Orange,
+        Self::Yellow,
+        Self::Lime,
+        Self::Green,
+        Self::Teal,
+        Self::Cyan,
+        Self::Blue,
+        Self::Violet,
+        Self::Pink,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Red => "Red",
+            Self::Orange => "Orange",
+            Self::Yellow => "Yellow",
+            Self::Lime => "Lime",
+            Self::Green => "Green",
+            Self::Teal => "Teal",
+            Self::Cyan => "Cyan",
+            Self::Blue => "Blue",
+            Self::Violet => "Violet",
+            Self::Pink => "Pink",
+        }
+    }
+
+    /// The label new layer `id` gets: the colours in turn, so neighbouring
+    /// layers differ. Also the colour shown for layers saved without one.
+    pub fn for_id(id: LayerId) -> Self {
+        Self::ALL[id.0 as usize % Self::ALL.len()]
+    }
+}
+
+/// Reads a label leniently: a label this version does not know (from a
+/// newer Fanimate) becomes no label, rather than failing the whole load.
+fn lenient_label<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Label>, D::Error> {
+    let name = Option::<String>::deserialize(d)?;
+    Ok(name.and_then(|n| Label::ALL.into_iter().find(|l| l.name().eq_ignore_ascii_case(&n))))
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
     pub id: LayerId,
     pub name: String,
+    /// Label colour. Layers saved before labels existed have none, and are
+    /// shown with [`Label::for_id`].
+    #[serde(
+        default,
+        deserialize_with = "lenient_label",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub label: Option<Label>,
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub visible: bool,
     pub opacity: Channel<f32>,
@@ -222,11 +291,17 @@ impl Layer {
         Self {
             id,
             name: name.into(),
+            label: None,
             visible: true,
             opacity: Channel::new(1.0),
             transform: AnimTransform::default(),
             kind,
         }
+    }
+
+    /// The label colour to show: the layer's own, or the one its id picks.
+    pub fn shown_label(&self) -> Label {
+        self.label.unwrap_or_else(|| Label::for_id(self.id))
     }
 
     pub fn with_transform(mut self, transform: AnimTransform) -> Self {
@@ -347,6 +422,21 @@ mod tests {
         assert!(!doc.insert(Some(a), 0, layer.clone()));
         assert!(doc.insert(Some(g), 99, layer));
         assert_eq!(doc.locate(c), Some((Some(g), 1)));
+    }
+
+    #[test]
+    fn labels_round_trip_and_unknown_ones_are_dropped() {
+        let mut layer = Layer::new(LayerId(3), "a", LayerKind::vector(vec![]));
+        assert_eq!(layer.shown_label(), Label::for_id(LayerId(3)));
+        layer.label = Some(Label::Teal);
+        let json = serde_json::to_string(&layer).unwrap();
+        assert!(json.contains(r#""label":"teal""#));
+        assert_eq!(serde_json::from_str::<Layer>(&json).unwrap(), layer);
+        let newer = json.replace("teal", "ultraviolet");
+        assert_eq!(serde_json::from_str::<Layer>(&newer).unwrap().label, None);
+        let none = serde_json::to_string(&Layer::new(LayerId(1), "b", LayerKind::vector(vec![]))).unwrap();
+        assert!(!none.contains("label"));
+        assert_ne!(Label::for_id(LayerId(1)), Label::for_id(LayerId(2)));
     }
 
     #[test]
