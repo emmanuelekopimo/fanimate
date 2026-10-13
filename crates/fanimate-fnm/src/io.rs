@@ -127,11 +127,16 @@ pub fn is_media_name(name: &str) -> bool {
 pub(crate) fn media_names(doc: &Document) -> Vec<String> {
     let mut names = Vec::new();
     doc.walk(|l| {
-        if let LayerKind::Image(img) = &l.kind
-            && is_media_name(&img.media)
-            && !names.contains(&img.media)
+        let media = match &l.kind {
+            LayerKind::Image(img) => Some(&img.media),
+            LayerKind::Audio(a) => Some(&a.media),
+            _ => None,
+        };
+        if let Some(m) = media
+            && is_media_name(m)
+            && !names.contains(m)
         {
-            names.push(img.media.clone());
+            names.push(m.clone());
         }
     });
     names
@@ -462,6 +467,41 @@ mod tests {
         assert!(report.is_clean(), "{report}");
         assert_eq!(loaded.layers, doc.layers);
         assert_eq!(loaded.media.len(), 1);
+        assert_eq!(loaded.media[&name], doc.media[&name]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn switch_and_audio_layers_round_trip() {
+        use fanimate_core::{Interpolation, Key};
+        let dir = temp_dir("switch-audio");
+        let path = dir.join("p.fnm");
+        let mut doc = samples::hello();
+        let bytes = b"RIFF not really a wav".to_vec();
+        let name = MediaFile::name_for(&bytes, "wav");
+        doc.media.insert(name.clone(), Arc::new(MediaFile { bytes }));
+        let mut audio = fanimate_core::Audio::new(name.clone());
+        audio.start = -3;
+        audio.volume = 0.5;
+        let sound = doc.new_layer("line", LayerKind::Audio(audio));
+        let mouths = ["rest", "AI"].map(|n| doc.new_layer(n, LayerKind::vector(vec![])));
+        let switch = doc.new_layer(
+            "mouth",
+            LayerKind::Switch {
+                children: mouths.to_vec(),
+                switch: vec![Key {
+                    frame: 4,
+                    value: "AI".into(),
+                    interp: Interpolation::Step,
+                }],
+            },
+        );
+        doc.layers.extend([sound, switch]);
+        save(&doc, &path).unwrap();
+        assert!(path.join(&name).is_file());
+        let (loaded, report) = load(&path).unwrap();
+        assert!(report.is_clean(), "{report}");
+        assert_eq!(loaded.layers, doc.layers);
         assert_eq!(loaded.media[&name], doc.media[&name]);
         fs::remove_dir_all(dir).unwrap();
     }

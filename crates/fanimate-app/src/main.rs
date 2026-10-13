@@ -16,9 +16,11 @@
 #![windows_subsystem = "windows"]
 
 mod app;
+mod audio;
 mod canvas_gpu;
 mod dialogs;
 mod icons;
+mod lipsync;
 mod menus;
 mod panels;
 mod recovery;

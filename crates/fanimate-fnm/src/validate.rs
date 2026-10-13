@@ -268,6 +268,26 @@ impl Checker {
                 }
             }
             LayerKind::Image(img) => self.image(img, &loc, bones),
+            LayerKind::Switch { children, switch } => {
+                self.keys(switch, |_| true, &format!("{loc} > switch keys"), end);
+                for child in children {
+                    self.layer(child, end, bones);
+                }
+            }
+            LayerKind::Audio(audio) => {
+                self.media_file(&audio.media, &loc, "sound");
+                if !(audio.volume.is_finite() && audio.volume >= 0.0) {
+                    self.issue(
+                        Severity::Error,
+                        &loc,
+                        format!("volume {} is not valid", audio.volume),
+                        true,
+                    );
+                    if self.repair {
+                        audio.volume = 1.0;
+                    }
+                }
+            }
             LayerKind::Bone { skeleton, children } => {
                 for i in 0..skeleton.bones.len() {
                     let bone = &mut skeleton.bones[i];
@@ -451,28 +471,32 @@ impl Checker {
 
     /// An image layer: a picture the project holds, a sensible size and
     /// mesh, and bone references that exist.
-    fn image(&mut self, img: &mut fanimate_core::Image, loc: &str, bones: Option<usize>) {
-        if !crate::is_media_name(&img.media) {
+    /// A media file reference: a safe name, for a file the project holds.
+    fn media_file(&mut self, name: &str, loc: &str, what: &str) {
+        if !crate::is_media_name(name) {
             self.issue(
                 Severity::Error,
                 loc,
-                format!(
-                    "picture name {:?} is not inside the project's media folder; it is not loaded",
-                    img.media
-                ),
+                format!("{what} name {name:?} is not inside the project's media folder; it is not loaded"),
                 false,
             );
-        } else if !self.media.contains(&img.media) {
+        } else if !self.media.contains(name) {
+            let shown = if what == "picture" {
+                "the layer shows a grey placeholder"
+            } else {
+                "it is silent"
+            };
             self.issue(
                 Severity::Warning,
                 loc,
-                format!(
-                    "picture {} is missing; the layer shows a grey placeholder",
-                    img.media
-                ),
+                format!("{what} {name} is missing; {shown}"),
                 false,
             );
         }
+    }
+
+    fn image(&mut self, img: &mut fanimate_core::Image, loc: &str, bones: Option<usize>) {
+        self.media_file(&img.media, loc, "picture");
         if !(img.width.is_finite() && img.width > 0.0 && img.height.is_finite() && img.height > 0.0) {
             self.issue(
                 Severity::Error,

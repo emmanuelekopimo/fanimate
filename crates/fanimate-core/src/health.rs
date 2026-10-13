@@ -161,8 +161,8 @@ fn mark_bound(layers: &[Layer], used: &mut [bool]) {
                     }
                 }
             }
-            LayerKind::Group { children } => mark_bound(children, used),
-            LayerKind::Bone { .. } => {}
+            LayerKind::Group { children } | LayerKind::Switch { children, .. } => mark_bound(children, used),
+            LayerKind::Bone { .. } | LayerKind::Audio(_) => {}
         }
     }
 }

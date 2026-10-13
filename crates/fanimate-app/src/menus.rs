@@ -59,6 +59,10 @@ pub fn item_checked(ui: &mut egui::Ui, shell: &mut Shell, action: Action, checke
             .map_or("Redo".to_owned(), |l| format!("Redo {l}")),
         // the submenu already says "Open Sample"
         Action::OpenSample(sample) => sample.name().to_owned(),
+        // a switch menu lists the layers to show by name
+        Action::SetSwitch(i) => switch_children(shell)
+            .and_then(|c| c.into_iter().nth(i))
+            .unwrap_or_else(|| action.label().to_owned()),
         a => a.label().to_owned(),
     };
     // the gap applies on both sides of the stretch before the shortcut, so
@@ -154,6 +158,7 @@ pub fn layer(ui: &mut egui::Ui, shell: &mut Shell) {
             Action::NewVectorLayer,
             Action::NewFramesLayer,
             Action::NewGroupLayer,
+            Action::NewSwitchLayer,
             Action::NewBoneLayer,
         ],
     );
@@ -171,6 +176,7 @@ pub fn layer(ui: &mut egui::Ui, shell: &mut Shell) {
         ],
     );
     label_menu(ui, shell);
+    switch_items(ui, shell);
     ui.separator();
     items(
         ui,
@@ -215,6 +221,36 @@ pub fn animation(ui: &mut egui::Ui, shell: &mut Shell) {
 }
 
 /// The interpolation of the keys on the current frame, one item each.
+/// The names of the selected switch layer's children, bottom first.
+fn switch_children(shell: &Shell) -> Option<Vec<String>> {
+    let id = shell.editor.switch_layer()?;
+    let children = shell.editor.doc.find(id)?.kind.children()?;
+    Some(children.iter().map(|c| c.name.clone()).collect())
+}
+
+/// "Show" items for each layer of the selected switch layer, top of the
+/// stack first, the one shown on the current frame checked.
+pub fn switch_items(ui: &mut egui::Ui, shell: &mut Shell) {
+    let Some(id) = shell.editor.switch_layer() else {
+        return;
+    };
+    let Some(fanimate_core::LayerKind::Switch { children, switch }) =
+        shell.editor.doc.find(id).map(|l| &l.kind)
+    else {
+        return;
+    };
+    let count = children.len();
+    let shown = fanimate_core::scene::switch_choice(children, switch, shell.editor.current_frame() as f32);
+    ui.separator();
+    ui.menu_button("Show Layer", |ui| {
+        ui.set_min_width(MENU_MIN_WIDTH);
+        for i in (0..count).rev() {
+            item_checked(ui, shell, Action::SetSwitch(i), shown == Some(i));
+        }
+    });
+    item(ui, shell, Action::LipSync);
+}
+
 pub fn interpolation_items(ui: &mut egui::Ui, shell: &mut Shell) {
     ui.separator();
     let current = shell.editor.key_interpolation().flatten();
@@ -336,6 +372,7 @@ pub fn layer_context(ui: &mut egui::Ui, shell: &mut Shell) {
                 Action::NewGroupLayer,
                 Action::NewBoneLayer,
                 Action::NewFramesLayer,
+                Action::NewSwitchLayer,
             ],
         );
     });
@@ -365,6 +402,7 @@ pub fn layer_context(ui: &mut egui::Ui, shell: &mut Shell) {
         ],
     );
     label_menu(ui, shell);
+    switch_items(ui, shell);
     ui.menu_button("Bones", |ui| {
         ui.set_min_width(MENU_MIN_WIDTH);
         items(

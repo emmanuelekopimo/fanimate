@@ -140,6 +140,12 @@ impl Evaluator {
                 LayerKind::Group { children } => {
                     self.visit(children, frame, world, opacity, rig, out);
                 }
+                LayerKind::Switch { children, switch } => {
+                    if let Some(i) = crate::scene::switch_choice(children, switch, frame) {
+                        self.visit(&children[i..=i], frame, world, opacity, rig, out);
+                    }
+                }
+                LayerKind::Audio(_) => {}
                 LayerKind::Image(image) => {
                     let mut vertices = image.vertices();
                     let mut transform = world;
@@ -547,6 +553,32 @@ mod tests {
         let mut out = Vec::new();
         ev.evaluate_into(&doc, 0.0, &mut out);
         assert_eq!(parts(out), [Some(Part::Line)]);
+    }
+
+    #[test]
+    fn a_switch_layer_shows_the_child_its_keys_name() {
+        let mut doc = Document::new("t", 100.0, 100.0, 24.0);
+        let a = doc.new_layer("A", LayerKind::vector(vec![square()]));
+        let b = doc.new_layer("rest", LayerKind::vector(vec![square(), square()]));
+        let (aid, bid) = (a.id, b.id);
+        let keys = vec![crate::Key {
+            frame: 5,
+            value: "A".to_owned(),
+            interp: Interpolation::Step,
+        }];
+        let sw = doc.new_layer(
+            "mouth",
+            LayerKind::Switch {
+                children: vec![a, b],
+                switch: keys,
+            },
+        );
+        doc.layers.push(sw);
+        let shown = |f: f32| evaluate(&doc, f).iter().map(|i| i.layer).collect::<Vec<_>>();
+        // before any key: the top child
+        assert_eq!(shown(0.0), [bid, bid]);
+        assert_eq!(shown(5.0), [aid]);
+        assert_eq!(shown(50.0), [aid]);
     }
 
     #[test]

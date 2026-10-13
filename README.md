@@ -18,7 +18,7 @@ Fanimate is a free, open-source 2D character animation app. It keeps what animat
 
 ## Try it
 
-You need [rustup](https://rustup.rs); it installs the pinned Rust version from `rust-toolchain.toml` on first build. On Linux, also install `libxkbcommon-dev`, `libwayland-dev` and `libgtk-3-dev` (for file dialogs).
+You need [rustup](https://rustup.rs); it installs the pinned Rust version from `rust-toolchain.toml` on first build. On Linux, also install `libxkbcommon-dev`, `libwayland-dev`, `libgtk-3-dev` (for file dialogs) and `libasound2-dev` (for sound).
 
 ```sh
 git clone https://github.com/toonittmedia/fanimate

@@ -65,6 +65,37 @@ fn is_one_cell(g: &[u32; 2]) -> bool {
     *g == [1, 1]
 }
 
+/// A sound on the timeline.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Audio {
+    /// The WAV file's name in the document's media store.
+    pub media: String,
+    /// The frame the sound starts on; negative starts it part-way through.
+    #[serde(default)]
+    pub start: crate::anim::Frame,
+    /// 1 is as recorded.
+    #[serde(default = "full", skip_serializing_if = "is_full")]
+    pub volume: f32,
+}
+
+fn full() -> f32 {
+    1.0
+}
+
+fn is_full(v: &f32) -> bool {
+    *v == 1.0
+}
+
+impl Audio {
+    pub fn new(media: impl Into<String>) -> Self {
+        Self {
+            media: media.into(),
+            start: 0,
+            volume: 1.0,
+        }
+    }
+}
+
 /// The most cells a mesh may have each way.
 pub const MAX_GRID: u32 = 64;
 

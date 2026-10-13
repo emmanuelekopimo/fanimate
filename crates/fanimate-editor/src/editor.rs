@@ -22,9 +22,11 @@ mod draw;
 mod import;
 mod points;
 mod shapes;
+mod sound;
 pub use bones::BoneRef;
 pub use draw::DrawStyle;
 pub use points::PointRef;
+pub use sound::{MouthCue, SoundInfo, parse_rhubarb, sound_info};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SelectMode {
@@ -276,6 +278,10 @@ impl Editor {
                 self.new_action(false);
             }
             NewFramesLayer => self.new_layer(NewKind::Frames),
+            NewSwitchLayer => self.new_layer(NewKind::Switch),
+            SetSwitch(i) => {
+                self.set_switch(i);
+            }
             NewDrawing => {
                 self.new_drawing(false);
             }
@@ -351,7 +357,7 @@ impl Editor {
                 use crate::action::Tool as T;
                 self.set_tool(if bone { T::AddBone } else { T::AddPoint });
             }
-            New | Open | OpenSample(_) | Save | SaveAs | Import | Quit | ToggleOnionSkin
+            New | Open | OpenSample(_) | Save | SaveAs | Import | LipSync | Quit | ToggleOnionSkin
             | ToggleLightTable | Preferences | CommandPalette | LayerProperties | ZoomIn | ZoomOut
             | FitView | ActualSize => return Outcome::App(action),
         }
@@ -379,6 +385,8 @@ impl Editor {
                 .actions_layer()
                 .is_some_and(|l| self.selected_bone().is_some_and(|b| b.layer == l)),
             FinishAction => self.editing_action().is_some(),
+            SetSwitch(_) => self.switch_layer().is_some(),
+            LipSync => self.switch_layer().is_some(),
             NewDrawing => self.primary().is_some_and(|id| {
                 matches!(self.doc.find(id).map(|l| &l.kind), Some(LayerKind::Frames { .. }))
             }),
@@ -582,6 +590,13 @@ impl Editor {
             NewKind::Vector => ("Layer", LayerKind::vector(vec![])),
             NewKind::Group => ("Group", LayerKind::Group { children: vec![] }),
             NewKind::Frames => ("Animation", LayerKind::Frames { cels: vec![] }),
+            NewKind::Switch => (
+                "Switch",
+                LayerKind::Switch {
+                    children: vec![],
+                    switch: vec![],
+                },
+            ),
             NewKind::Bone => (
                 "Bones",
                 LayerKind::Bone {
@@ -1268,6 +1283,7 @@ enum NewKind {
     Vector,
     Group,
     Frames,
+    Switch,
     Bone,
 }
 

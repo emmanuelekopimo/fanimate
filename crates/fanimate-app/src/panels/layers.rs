@@ -114,6 +114,8 @@ fn type_icon(kind: &LayerKind) -> Icon {
         LayerKind::Bone { .. } => Icon::BoneLayer,
         LayerKind::Image(_) => Icon::ImageLayer,
         LayerKind::Frames { .. } => Icon::FramesLayer,
+        LayerKind::Switch { .. } => Icon::SwitchLayer,
+        LayerKind::Audio(_) => Icon::AudioLayer,
     }
 }
 

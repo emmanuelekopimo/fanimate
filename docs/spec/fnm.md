@@ -32,7 +32,7 @@ All files are UTF-8 JSON. Whitespace is not significant; Fanimate writes them in
 
 ## Media files
 
-Pictures used by image layers live in the `media` folder, as PNG or JPEG files. Fanimate names each file after its content (a hash and the size in bytes), so the same picture is stored once and a file never changes once written. A file no layer uses is not saved. A missing picture does not stop the project opening: the layer shows a grey placeholder.
+Pictures used by image layers live in the `media` folder, as PNG or JPEG files, and sounds used by audio layers as WAV files. Fanimate names each file after its content (a hash and the size in bytes), so the same picture is stored once and a file never changes once written. A file no layer uses is not saved. A missing file does not stop the project opening: a picture shows as a grey placeholder and a sound is silent.
 
 ## `manifest.json`
 
@@ -94,7 +94,7 @@ Each file in `layers/` holds one top-level layer. Child layers of groups and bon
 | `visible` | boolean | Optional, default `true` |
 | `opacity` | [channel](#channels) of number | 0 to 1. Multiplies with ancestors' opacity. |
 | `transform` | object | `position` (channel of [vector](#vectors)), `rotation` (channel of number, radians), `scale` (channel of vector) |
-| `type` | string | `"vector"`, `"group"`, `"bone"`, `"image"` or `"frames"` (both version 3); decides the remaining fields |
+| `type` | string | `"vector"`, `"group"`, `"bone"`, `"image"`, `"frames"`, `"switch"` or `"audio"` (the last four version 3); decides the remaining fields |
 
 A layer's transform applies scale, then rotation, then position, relative to its parent.
 
@@ -128,6 +128,36 @@ Frame-by-frame animation: a list of drawings, each shown from its frame until th
 | `cels[].rough`, `.colour`, `.line`, `.overlay` | arrays of [shapes](#shapes) | Optional. The drawing's sub-layers, drawn in that order (rough at the bottom). Renders leave `rough` out. |
 
 Nothing is shown before the first drawing. Shapes in drawings may be bound to bones like any shape.
+
+### `"type": "switch"`
+
+Shows one child at a time, such as mouth shapes for lip sync, hands or eyes. Version 3.
+
+```json
+{"type": "switch", "children": [], "switch": [
+  {"frame": 0, "value": "rest", "interp": "step"},
+  {"frame": 6, "value": "AI", "interp": "step"}
+]}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `children` | array of layers | The layers to choose from |
+| `switch` | array of [channel keys](#channels) whose values are strings | Optional. From each key's frame on, the child whose `name` matches the key's value (ignoring case) is shown. Sorted, one per frame, no negative frames. `interp` is written as `"step"` and has no other meaning here. |
+
+Before the first key, or when a key names no child, the last child (the top of the stack) is shown.
+
+### `"type": "audio"`
+
+Sound on the timeline. Version 3. It draws nothing.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `media` | string | The WAV file, under the same rules as an image's `media` |
+| `start` | integer | Optional, default 0. The frame the sound starts on; negative starts it part-way through. |
+| `volume` | number | Optional, default 1 (as recorded). 0 is silent. Not negative. |
+
+A hidden audio layer is silent.
 
 ### `"type": "image"`
 
@@ -377,11 +407,14 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | Bone `strength` not a positive number | Warning | Use the default |
 | Drawings on negative frames | Error | Remove them |
 | Drawings out of order or two on one frame | Error | Sort; of two on one frame, keep the later in the file |
-| Image `media` name outside the `media` folder | Error | None; the picture is not read |
+| Image or audio `media` name outside the `media` folder | Error | None; the file is not read |
 | Image picture file missing | Warning | None; drawn as a grey placeholder |
 | Image size not positive | Error | Set to 100 × 100 |
 | Image `grid` outside 1 to 64 | Error | Clamp it and remove the `skin` |
 | Image `skin` not matching the mesh, or naming missing bones | Error | Remove the `skin` |
+| Switch keys out of order, duplicated or negative | Error | As for channel keys |
+| Audio `volume` negative or not finite | Error | Set to 1 |
+| Sound file missing | Warning | None; the layer is silent |
 | Action whose `driver` does not exist | Error | Remove the action |
 | Action `length` not positive | Error | Set to 1 |
 | Action keys for a bone that does not exist | Error | Remove those keys |
@@ -403,4 +436,4 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | 0 | Fanimate 0.0.1 | First version: layers, shapes, bones, channels | |
 | 1 | Development builds after Fanimate 0.0.5 (never released) | Shapes may have a stroke width profile (`widths`), written by the brush | Version 0 files need no conversion. A version 0 reader would ignore `widths` and draw brush strokes at one width, so the version was bumped. |
 | 2 | Fanimate 0.0.6 | Shapes may have point keyframes (`path_keys`) | Older files need no conversion. An older reader would ignore `path_keys` and draw animated drawings without their animation, so the version was bumped. |
-| 3 | Fanimate 0.0.7 | Layers may have a label colour (`label`); bones may have `limits`, `pinned` and `strength`; shapes may have a smooth binding (`skin`); bone layers may have actions and Smart Bone actions; image layers and the `media` folder; frame-by-frame layers | Older files need no conversion. An older reader would drop labels and draw smoothly bound artwork unbound, so the version was bumped. |
+| 3 | Fanimate 0.0.7 | Layers may have a label colour (`label`); bones may have `limits`, `pinned` and `strength`; shapes may have a smooth binding (`skin`); bone layers may have actions and Smart Bone actions; image layers and the `media` folder; frame-by-frame, switch and audio layers | Older files need no conversion. An older reader would drop labels and draw smoothly bound artwork unbound, so the version was bumped. |

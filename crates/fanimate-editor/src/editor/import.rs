@@ -154,7 +154,7 @@ impl Editor {
 
     /// Put an imported layer above the selection (inside a selected group
     /// or bone layer), and select it.
-    fn place_imported(&mut self, layer: Layer) {
+    pub(super) fn place_imported(&mut self, layer: Layer) {
         let id = layer.id;
         let (parent, index) = match self.primary().and_then(|p| self.doc.find(p)) {
             Some(p) if p.kind.children().is_some() => (Some(p.id), p.kind.children().map_or(0, Vec::len)),
@@ -169,7 +169,7 @@ impl Editor {
 }
 
 /// The file name without folders or extension, for a layer name.
-fn stem(name: &str) -> String {
+pub(super) fn stem(name: &str) -> String {
     let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
     let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
     if stem.is_empty() {

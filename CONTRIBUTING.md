@@ -30,7 +30,7 @@ cargo test --workspace                     # run the tests
 Linux also needs the usual windowing libraries, for example on Ubuntu:
 
 ```sh
-sudo apt install libxkbcommon-dev libwayland-dev libgtk-3-dev
+sudo apt install libxkbcommon-dev libwayland-dev libgtk-3-dev libasound2-dev
 ```
 
 ### Repository layout

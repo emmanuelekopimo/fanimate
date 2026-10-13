@@ -7,6 +7,7 @@
 
 use eframe::egui::{self, RichText};
 use fanimate_core::{Color, LayerKind};
+use fanimate_editor::Action;
 
 use crate::app::Shell;
 
@@ -85,9 +86,13 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
         LayerKind::Bone { .. } => "Bone layer",
         LayerKind::Image(_) => "Image layer",
         LayerKind::Frames { .. } => "Frame-by-frame layer",
+        LayerKind::Switch { .. } => "Switch layer",
+        LayerKind::Audio(_) => "Audio layer",
     };
     let mut name = l.name.clone();
     let mut visible = l.visible;
+    // sound has no picture to place or fade
+    let drawn = !matches!(l.kind, LayerKind::Audio(_));
     let animated = (
         l.transform.position.is_animated(),
         l.transform.rotation.is_animated(),
@@ -103,20 +108,29 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
         .spacing([8.0, 6.0])
         .show(ui, |ui| {
             ui.label("Name");
-            let r = ui.add(egui::TextEdit::singleline(&mut name).desired_width(160.0));
+            // a minimum too: the grid sizes its columns from the widest
+            // row, and a sound layer has no wide rows
+            let r = ui.add(
+                egui::TextEdit::singleline(&mut name)
+                    .desired_width(160.0)
+                    .min_size(egui::vec2(160.0, 0.0)),
+            );
             if r.lost_focus() {
                 shell.editor.rename(id, &name);
             }
             ui.label("");
             ui.end_row();
 
-            ui.label("Visible");
+            ui.label(if drawn { "Visible" } else { "Audible" });
             if ui.checkbox(&mut visible, "").changed() {
                 shell.editor.set_visible(id, visible);
             }
             ui.label("");
             ui.end_row();
 
+            if !drawn {
+                return;
+            }
             let Some(mut t) = shell.editor.layer_transform(id) else {
                 return;
             };
@@ -181,6 +195,9 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
 
     ui.add_space(6.0);
     ui.horizontal_wrapped(|ui| {
+        if !drawn {
+            return;
+        }
         ui.spacing_mut().item_spacing.x = 4.0;
         key_mark(ui, true, key_color);
         ui.label(
@@ -222,6 +239,102 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
         ui.label(RichText::new(bound).color(muted));
         if !shell.editor.doc.media.contains_key(&img.media) {
             ui.label(RichText::new("The picture file is missing.").color(shell.palette.error));
+        }
+    }
+    if let Some(l) = shell.editor.doc.find(id)
+        && let LayerKind::Switch { children, switch } = &l.kind
+    {
+        let names: Vec<String> = children.iter().rev().map(|c| c.name.clone()).collect();
+        let count = children.len();
+        let shown =
+            fanimate_core::scene::switch_choice(children, switch, shell.editor.current_frame() as f32)
+                .map(|i| count - 1 - i);
+        ui.add_space(8.0);
+        heading(ui, shell, "Switch");
+        if names.is_empty() {
+            ui.label(RichText::new("Put one layer inside for each drawing to switch between.").color(muted));
+        }
+        // top of stack first, as in the Layers panel
+        for (row, n) in names.iter().enumerate() {
+            if ui
+                .selectable_label(shown == Some(row), n)
+                .on_hover_text("Show this layer from the current frame on")
+                .clicked()
+            {
+                shell.pending.push(Action::SetSwitch(count - 1 - row));
+            }
+        }
+        ui.add_space(4.0);
+        if ui
+            .button(Action::LipSync.label())
+            .on_hover_text(
+                "Keys this layer from a dialogue sound: name its layers A to H and X, \
+                 or MBP, etc, E, AI, O, U, FV, L and rest",
+            )
+            .clicked()
+        {
+            shell.pending.push(Action::LipSync);
+        }
+        if shell.lipsync.is_some() {
+            ui.horizontal(|ui| {
+                ui.spinner();
+                ui.label(RichText::new("Listening to the sound…").color(muted));
+            });
+        }
+    }
+    if let Some(l) = shell.editor.doc.find(id)
+        && let LayerKind::Audio(a) = &l.kind
+    {
+        let (mut start, mut volume) = (a.start, a.volume * 100.0);
+        let info = shell
+            .editor
+            .doc
+            .media
+            .get(&a.media)
+            .map(|f| fanimate_editor::sound_info(&f.bytes));
+        ui.add_space(8.0);
+        heading(ui, shell, "Sound");
+        let mut changed = None;
+        egui::Grid::new("audio-props")
+            .num_columns(2)
+            .spacing([8.0, 6.0])
+            .show(ui, |ui| {
+                ui.label("Starts on frame");
+                let r = ui.add(egui::DragValue::new(&mut start).speed(0.2));
+                if r.changed() {
+                    changed = Some(r);
+                }
+                ui.end_row();
+                ui.label("Volume");
+                let r = ui.add(egui::Slider::new(&mut volume, 0.0..=200.0).suffix("%"));
+                if r.changed() {
+                    changed = Some(r);
+                }
+                ui.end_row();
+            });
+        if let Some(r) = changed {
+            begin_edit(shell, &r, "Change sound");
+            shell.editor.set_audio(id, start, volume / 100.0);
+        }
+        match info {
+            Some(Ok(i)) => {
+                let fps = shell.editor.doc.fps;
+                ui.label(
+                    RichText::new(format!(
+                        "{:.1} seconds ({} frames), {}",
+                        i.seconds,
+                        (i.seconds * fps).ceil(),
+                        if i.channels == 1 { "mono" } else { "stereo" }
+                    ))
+                    .color(muted),
+                );
+            }
+            Some(Err(_)) => {
+                ui.label(RichText::new("The sound file cannot be read.").color(shell.palette.error));
+            }
+            None => {
+                ui.label(RichText::new("The sound file is missing.").color(shell.palette.error));
+            }
         }
     }
     if let Some(l) = shell.editor.doc.find(id)

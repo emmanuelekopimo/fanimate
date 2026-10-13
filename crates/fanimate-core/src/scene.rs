@@ -335,7 +335,8 @@ impl Layer {
                     .for_each(|c| c.shapes().for_each(|(_, _, s)| f(&s.path_keys)));
             }
             LayerKind::Bone { skeleton, .. } => skeleton.bones.iter().for_each(|b| f(&b.angle.keys)),
-            LayerKind::Group { .. } | LayerKind::Image(_) => {}
+            LayerKind::Switch { switch, .. } => f(switch),
+            LayerKind::Group { .. } | LayerKind::Image(_) | LayerKind::Audio(_) => {}
         }
     }
 
@@ -354,7 +355,8 @@ impl Layer {
                 f(cels);
             }
             LayerKind::Bone { skeleton, .. } => skeleton.bones.iter_mut().for_each(|b| f(&mut b.angle.keys)),
-            LayerKind::Group { .. } | LayerKind::Image(_) => {}
+            LayerKind::Switch { switch, .. } => f(switch),
+            LayerKind::Group { .. } | LayerKind::Image(_) | LayerKind::Audio(_) => {}
         }
     }
 
@@ -366,6 +368,19 @@ impl Layer {
         frames.dedup();
         frames
     }
+}
+
+/// The child a switch layer shows on `frame`: the one named by the last
+/// key at or before it (names compare without regard to case), or with no
+/// such key, the top child.
+pub fn switch_choice(children: &[Layer], keys: &[crate::anim::Key<String>], frame: f32) -> Option<usize> {
+    let held = keys.partition_point(|k| k.frame as f32 <= frame);
+    let named = held.checked_sub(1).and_then(|i| {
+        children
+            .iter()
+            .position(|c| c.name.eq_ignore_ascii_case(&keys[i].value))
+    });
+    named.or(children.len().checked_sub(1))
 }
 
 /// What a layer contains. Matches Moho's layer types where they overlap.
@@ -385,6 +400,16 @@ pub enum LayerKind {
     Image(crate::media::Image),
     /// Frame-by-frame drawings (see [`crate::frames`]).
     Frames { cels: Vec<crate::frames::Cel> },
+    /// Shows one of its children at a time, chosen by name on keys: mouth
+    /// shapes for lip sync, hands, eyes. With no keys, the top child shows.
+    Switch {
+        children: Vec<Layer>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        switch: Vec<crate::anim::Key<String>>,
+    },
+    /// Sound on the timeline (see [`crate::media`]): a WAV file from the
+    /// media store, starting on `start`.
+    Audio(crate::media::Audio),
 }
 
 impl LayerKind {
@@ -394,15 +419,19 @@ impl LayerKind {
 
     pub fn children(&self) -> Option<&Vec<Layer>> {
         match self {
-            Self::Vector { .. } | Self::Image(_) | Self::Frames { .. } => None,
-            Self::Group { children } | Self::Bone { children, .. } => Some(children),
+            Self::Vector { .. } | Self::Image(_) | Self::Frames { .. } | Self::Audio(_) => None,
+            Self::Group { children } | Self::Bone { children, .. } | Self::Switch { children, .. } => {
+                Some(children)
+            }
         }
     }
 
     pub fn children_mut(&mut self) -> Option<&mut Vec<Layer>> {
         match self {
-            Self::Vector { .. } | Self::Image(_) | Self::Frames { .. } => None,
-            Self::Group { children } | Self::Bone { children, .. } => Some(children),
+            Self::Vector { .. } | Self::Image(_) | Self::Frames { .. } | Self::Audio(_) => None,
+            Self::Group { children } | Self::Bone { children, .. } | Self::Switch { children, .. } => {
+                Some(children)
+            }
         }
     }
 }

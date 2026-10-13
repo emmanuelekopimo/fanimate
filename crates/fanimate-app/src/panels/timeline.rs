@@ -1,7 +1,7 @@
 //! The Timeline panel: transport controls, a scrubbable ruler, and a row of
 //! keyframes per layer.
 
-use eframe::egui::{self, Id, Rect, RichText, Sense, Shape, Stroke, pos2, vec2};
+use eframe::egui::{self, Id, Rangef, Rect, RichText, Sense, Shape, Stroke, pos2, vec2};
 use fanimate_core::{Frame, Interpolation, LayerId};
 use fanimate_editor::{Action, SelectMode};
 
@@ -175,6 +175,17 @@ fn row(
             .collect(),
         _ => Vec::new(),
     };
+    // a switch layer names the drawing each key shows
+    let switch_names: Vec<(Frame, String)> = match &layer.kind {
+        fanimate_core::LayerKind::Switch { switch, .. } => {
+            switch.iter().map(|k| (k.frame, k.value.clone())).collect()
+        }
+        _ => Vec::new(),
+    };
+    let sound = match &layer.kind {
+        fanimate_core::LayerKind::Audio(a) => Some((a.media.clone(), a.start, a.volume)),
+        _ => None,
+    };
     let label = crate::theme::label_color(layer.shown_label());
     let glyphs = key_glyphs(layer);
     let p = shell.palette;
@@ -207,6 +218,22 @@ fn row(
         );
         let shade = if i % 2 == 0 { 0.55 } else { 0.4 };
         keys_painter.rect_filled(block, 2.0, label.gamma_multiply(shade));
+    }
+    if let Some((media, from, volume)) = sound
+        && let Some(peaks) = shell.audio.peaks(&shell.editor.doc, &media)
+    {
+        // only the frames in view, one line each
+        let clip = keys.intersect(keys_clip);
+        let first = (frame_at(clip.left()) - from - 1).max(0) as usize;
+        let last = ((frame_at(clip.right()) - from + 1).max(0) as usize).min(peaks.len());
+        let mid = rect.center().y;
+        let reach = (ROW_HEIGHT / 2.0 - 3.0) * volume.min(1.0);
+        let width = (2.0 * half - 1.0).clamp(1.0, 3.0);
+        for (i, (lo, hi)) in peaks.iter().enumerate().take(last).skip(first) {
+            let x = x_of((from + i as Frame) as f32);
+            let span = Rangef::new(mid - hi * reach, mid - lo * reach + 1.0);
+            keys_painter.vline(x, span, Stroke::new(width, p.text.gamma_multiply(0.7)));
+        }
     }
     painter.hline(
         rect.x_range(),
@@ -271,6 +298,16 @@ fn row(
         }
     }
 
+    for (f, name) in &switch_names {
+        key_painter.text(
+            pos2(x_of(*f as f32) + 7.0, keys.center().y),
+            egui::Align2::LEFT_CENTER,
+            name,
+            egui::FontId::proportional(10.0),
+            p.text,
+        );
+    }
+
     // key area: click to select the layer and jump to that frame; drag a
     // key to retime it (with the keys of the other selected layers on that
     // frame), or drag elsewhere to scrub; right-click for the key menu
@@ -326,6 +363,7 @@ fn row(
         menus::item(ui, shell, Action::AddKey);
         menus::item(ui, shell, Action::DeleteKey);
         menus::interpolation_items(ui, shell);
+        menus::switch_items(ui, shell);
         ui.separator();
         menus::item(ui, shell, Action::PrevKey);
         menus::item(ui, shell, Action::NextKey);

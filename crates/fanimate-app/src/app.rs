@@ -151,6 +151,10 @@ pub struct Shell {
     pub onion: OnionSkin,
     /// Fade every layer but the selected ones.
     pub light_table: bool,
+    /// Plays audio layers along with playback.
+    pub audio: crate::audio::Audio,
+    /// A lip sync waiting on Rhubarb.
+    pub lipsync: Option<crate::lipsync::Job>,
     last_tick: Instant,
     allow_close: bool,
 }
@@ -229,6 +233,8 @@ impl FanimateApp {
                 recovery: Recovery::new(recovery_root),
                 onion: settings.onion,
                 light_table: false,
+                audio: Default::default(),
+                lipsync: None,
                 editor,
                 keymap: Keymap::new(KeymapKind::from_id(&settings.keymap).unwrap_or_default()),
                 theme: settings.theme,
@@ -302,6 +308,10 @@ impl eframe::App for FanimateApp {
         let dt = (now - shell.last_tick).as_secs_f32().min(0.25);
         shell.last_tick = now;
         shell.editor.tick(dt);
+        shell
+            .audio
+            .follow(&shell.editor.doc, shell.editor.playing, shell.editor.frame);
+        crate::lipsync::poll(&ctx, shell);
 
         handle_close_request(&ctx, shell);
         titlebar::track_window(&ctx, &mut shell.ui.window);
@@ -524,6 +534,7 @@ pub fn run_unchecked(ctx: &egui::Context, shell: &mut Shell, action: Action) {
                 save(shell, true);
             }
             Action::Import => import_dialog(shell),
+            Action::LipSync => crate::lipsync::start(shell),
             Action::ToggleOnionSkin => shell.onion.on = !shell.onion.on,
             Action::ToggleLightTable => shell.light_table = !shell.light_table,
             Action::Quit => {
@@ -549,11 +560,14 @@ fn zoom_by(shell: &mut Shell, factor: f32) {
     shell.view.zoom = (shell.view.zoom * factor).clamp(0.02, 64.0);
 }
 
-/// Pick pictures or a Photoshop file and import them as image layers.
+/// Pick pictures, Photoshop files or sounds and import them as layers.
 fn import_dialog(shell: &mut Shell) {
     let Some(paths) = rfd::FileDialog::new()
-        .set_title("Import pictures or a Photoshop file")
-        .add_filter("Pictures and Photoshop files", &["png", "jpg", "jpeg", "psd"])
+        .set_title("Import pictures, a Photoshop file or sound")
+        .add_filter(
+            "Pictures, Photoshop files and sound",
+            &["png", "jpg", "jpeg", "psd", "wav"],
+        )
         .pick_files()
     else {
         return;
@@ -561,11 +575,14 @@ fn import_dialog(shell: &mut Shell) {
     for path in paths {
         let name = path.display().to_string();
         let result = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|bytes| {
-            let psd = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("psd"));
-            if psd {
-                shell.editor.import_psd(&name, &bytes)
-            } else {
-                shell.editor.import_picture(&name, bytes)
+            let ext = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            match ext.as_str() {
+                "psd" => shell.editor.import_psd(&name, &bytes),
+                "wav" => shell.editor.import_audio(&name, bytes),
+                _ => shell.editor.import_picture(&name, bytes),
             }
         });
         if let Err(e) = result {

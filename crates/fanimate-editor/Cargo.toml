@@ -13,6 +13,7 @@ fanimate-core.workspace = true
 fanimate-fnm.workspace = true
 serde.workspace = true
 image.workspace = true
+hound.workspace = true
 psd.workspace = true
 serde_json.workspace = true
 

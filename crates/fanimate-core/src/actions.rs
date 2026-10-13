@@ -320,8 +320,9 @@ fn for_each_shape(layers: &mut [Layer], f: &mut impl FnMut(LayerId, usize, &mut 
                     f(id, i, s);
                 }
             }
-            LayerKind::Group { children } => for_each_shape(children, f),
-            LayerKind::Bone { .. } | LayerKind::Image(_) | LayerKind::Frames { .. } => {}
+            LayerKind::Group { children } | LayerKind::Switch { children, .. } => for_each_shape(children, f),
+            LayerKind::Bone { .. } | LayerKind::Image(_) | LayerKind::Frames { .. } | LayerKind::Audio(_) => {
+            }
         }
     }
 }

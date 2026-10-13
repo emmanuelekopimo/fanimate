@@ -815,8 +815,10 @@ fn renumber_bones(layer: &mut fanimate_core::Layer, map: &[Option<usize>]) {
                 }
             }
             // a nested bone layer's shapes refer to its own bones
-            LayerKind::Bone { .. } => {}
-            LayerKind::Group { children } => children.iter_mut().for_each(|c| go(c, map)),
+            LayerKind::Bone { .. } | LayerKind::Audio(_) => {}
+            LayerKind::Group { children } | LayerKind::Switch { children, .. } => {
+                children.iter_mut().for_each(|c| go(c, map))
+            }
         }
     }
     if let LayerKind::Bone { children, .. } = &mut layer.kind {

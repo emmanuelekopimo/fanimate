@@ -1,7 +1,9 @@
 //! The X-sheet: the same timing as the timeline, laid out as traditional
 //! animators write it. Frames run down the page, one column per layer. A
 //! frame-by-frame layer's column numbers each drawing where it starts and
-//! draws a line down its exposure; other layers mark their keys.
+//! draws a line down its exposure; a switch layer's column names the
+//! layer each key shows, like a lip sync chart; other layers mark their
+//! keys.
 
 use eframe::egui::{self, Id, Rect, RichText, Sense, Stroke, pos2, vec2};
 use fanimate_core::{Frame, LayerId, LayerKind};
@@ -16,7 +18,7 @@ const FRAME_COLUMN: f32 = 44.0;
 const HEADER: f32 = 24.0;
 
 /// What a column shows on one frame.
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, PartialEq)]
 enum Cell {
     Empty,
     /// A drawing starts here; its number.
@@ -25,6 +27,8 @@ enum Cell {
     Held,
     /// A key on a layer that is not frame-by-frame.
     Key,
+    /// A switch layer's key: the layer it shows, as a mouth chart is read.
+    Shows(String),
 }
 
 struct Column {
@@ -55,6 +59,13 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
                             } else {
                                 Cell::Held
                             };
+                        }
+                    }
+                }
+                LayerKind::Switch { switch, .. } => {
+                    for k in switch {
+                        if (start..=end).contains(&k.frame) {
+                            cells[(k.frame - start) as usize] = Cell::Shows(k.value.clone());
                         }
                     }
                 }
@@ -172,7 +183,16 @@ fn row(
         if selected {
             painter.rect_filled(cell, 0.0, p.accent.gamma_multiply(0.12));
         }
-        match col.cells[i] {
+        match &col.cells[i] {
+            Cell::Shows(name) => {
+                painter.text(
+                    cell.center(),
+                    egui::Align2::CENTER_CENTER,
+                    truncate(name, 9),
+                    egui::FontId::proportional(12.0),
+                    p.text,
+                );
+            }
             Cell::Drawing(n) => {
                 painter.text(
                     cell.center(),

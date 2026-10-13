@@ -41,6 +41,7 @@ pub enum Action {
     NewGroupLayer,
     NewBoneLayer,
     NewFramesLayer,
+    NewSwitchLayer,
     GroupLayers,
     Ungroup,
     MoveLayerUp,
@@ -78,6 +79,10 @@ pub enum Action {
     DeleteKey,
     /// A blank drawing on the current frame of a frame-by-frame layer.
     NewDrawing,
+    /// Show child n of the selected switch layer from the current frame.
+    SetSwitch(usize),
+    /// Key the selected switch layer's mouths from a sound, with Rhubarb.
+    LipSync,
     /// The sub-layer the tools draw on in frame-by-frame layers.
     SetPart(fanimate_core::Part),
     /// How the keys on the current frame move on to the next key.
@@ -132,6 +137,9 @@ impl Action {
             NewGroupLayer => "New Group",
             NewBoneLayer => "New Bone Layer",
             NewFramesLayer => "New Frame-by-Frame Layer",
+            NewSwitchLayer => "New Switch Layer",
+            SetSwitch(_) => "Show This Layer",
+            LipSync => "Lip Sync from Sound…",
             NewDrawing => "New Blank Drawing",
             SetPart(p) => match p {
                 fanimate_core::Part::Rough => "Draw on Rough",
@@ -211,6 +219,7 @@ impl Action {
             NewGroupLayer,
             NewBoneLayer,
             NewFramesLayer,
+            NewSwitchLayer,
             GroupLayers,
             Ungroup,
             MoveLayerUp,
@@ -233,6 +242,7 @@ impl Action {
             AddKey,
             DeleteKey,
             NewDrawing,
+            LipSync,
             ToggleOnionSkin,
             ToggleLightTable,
             ZoomIn,

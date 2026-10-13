@@ -47,6 +47,8 @@ pub enum Icon {
     OnionSkin,
     LightTable,
     XSheet,
+    SwitchLayer,
+    AudioLayer,
 }
 
 macro_rules! lucide {
@@ -114,6 +116,8 @@ impl Icon {
             Self::OnionSkin => lucide!("layers-2"),
             Self::LightTable => lucide!("lamp"),
             Self::XSheet => lucide!("table-2"),
+            Self::SwitchLayer => lucide!("toggle-left"),
+            Self::AudioLayer => lucide!("audio-lines"),
         }
     }
 }
@@ -256,6 +260,8 @@ mod tests {
             Icon::OnionSkin,
             Icon::LightTable,
             Icon::XSheet,
+            Icon::SwitchLayer,
+            Icon::AudioLayer,
         ]);
         icons
     }

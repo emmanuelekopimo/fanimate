@@ -23,6 +23,8 @@ pollster.workspace = true
 wgpu.workspace = true
 winit.workspace = true
 image.workspace = true
+cpal.workspace = true
+hound.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 eframe = { version = "0.36", default-features = false, features = ["wgpu", "default_fonts", "accesskit", "wayland", "x11", "persistence"] }
