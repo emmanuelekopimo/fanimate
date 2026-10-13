@@ -99,8 +99,9 @@ pub fn hello() -> Document {
 
 /// The Gate 1 benchmark scene: a creature with `bones` bones split into
 /// eight limbs, every bone carrying a segment and a joint shape, every bone
-/// keyed through the whole range. The Phase 1 budget is 60 fps with 40 bones
-/// (Smart Bones arrive in milestone M3).
+/// keyed through the whole range, and up to ten Smart Bones, spread over
+/// the bones, each reshaping the body as its bone turns. The Phase 1 budget
+/// is 60 fps with 40 bones and 10 Smart Bones.
 pub fn benchmark(bones: usize) -> Document {
     let mut doc = Document::new(format!("Benchmark ({bones} bones)"), 1920.0, 1080.0, 24.0);
     doc.end = 119;
@@ -178,7 +179,43 @@ pub fn benchmark(bones: usize) -> Document {
         Style::fill(palette::VIOLET_500).with_stroke(palette::BONE, 6.0),
     );
     let limbs_layer = doc.new_layer("limbs", LayerKind::vector(limb_shapes));
-    let body_layer = doc.new_layer("body", LayerKind::vector(vec![body]));
+    let body_layer = doc.new_layer("body", LayerKind::vector(vec![body.clone()]));
+
+    // Smart Bones: each turns from its rest angle to 0.6 more over 24
+    // frames, pushing one of the body's points out
+    let smart = 10.min(bones);
+    for k in 0..smart {
+        let driver = k * bones / smart;
+        let rest = skel.bones[driver].angle.base;
+        let mut act = crate::actions::RigAction::new(format!("smart {k}"), Some(driver), 24);
+        act.bones.push(crate::actions::BoneKeys {
+            bone: driver,
+            angle: crate::Channel::new(rest)
+                .with_key(0, rest, Interpolation::Linear)
+                .with_key(24, rest + 0.6, Interpolation::Linear),
+        });
+        let mut pushed = body.path.clone();
+        let point = k % 4;
+        let out = pushed.on_curve_points()[point] - center;
+        pushed.move_points(&[point].into_iter().collect(), out.normalize_or_zero() * 15.0);
+        act.shapes.push(crate::actions::ShapeKeys {
+            layer: body_layer.id,
+            shape: 0,
+            path_keys: vec![
+                crate::Key {
+                    frame: 0,
+                    value: body.path.clone(),
+                    interp: Interpolation::Linear,
+                },
+                crate::Key {
+                    frame: 24,
+                    value: pushed,
+                    interp: Interpolation::Linear,
+                },
+            ],
+        });
+        skel.actions.push(act);
+    }
     let rig = doc.new_layer(
         "creature",
         LayerKind::Bone {
@@ -214,7 +251,16 @@ mod tests {
             };
             assert_eq!(skeleton.bones.len(), n);
             assert_eq!(evaluate(&doc, 10.0).len(), n * 2 + 1);
+            assert_eq!(skeleton.actions.len(), 10.min(n));
         }
+        // the Smart Bones reshape the body while their bones turn
+        let doc = benchmark(40);
+        let rest = Path::circle(Vec2::new(960.0, 540.0), 110.0);
+        let changed = (0..120).any(|f| {
+            let items = evaluate(&doc, f as f32);
+            items.last().is_some_and(|i| i.shape.path != rest)
+        });
+        assert!(changed);
     }
 
     #[test]

@@ -127,7 +127,7 @@ pub fn status_bar(ui: &mut egui::Ui, shell: &mut Shell) {
         )
         .show(ui, |ui| {
             ui.horizontal_centered(|ui| {
-                let (text, color) = match &shell.editor.status {
+                let (text, color): (String, egui::Color32) = match &shell.editor.status {
                     Some((StatusKind::Error, m)) => (m.clone(), p.error),
                     Some((StatusKind::Warning, m)) => (m.clone(), p.keyframe),
                     Some((StatusKind::Success, m)) => (m.clone(), p.success),
@@ -137,7 +137,9 @@ pub fn status_bar(ui: &mut egui::Ui, shell: &mut Shell) {
                         p.text_muted,
                     ),
                 };
-                ui.label(RichText::new(text).size(12.0).color(color));
+                let hover = text.clone();
+                // state on the right first, so a long message is cut short
+                // with an ellipsis instead of running under it
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let muted = |s: String| RichText::new(s).size(12.0).color(p.text_muted);
                     ui.label(muted(shell.gpu_name.clone()));
@@ -165,6 +167,11 @@ pub fn status_bar(ui: &mut egui::Ui, shell: &mut Shell) {
                         shell.editor.current_frame(),
                         doc.end
                     )));
+                    ui.separator();
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add(egui::Label::new(RichText::new(text).size(12.0).color(color)).truncate())
+                            .on_hover_text(&hover);
+                    });
                 });
             });
         });

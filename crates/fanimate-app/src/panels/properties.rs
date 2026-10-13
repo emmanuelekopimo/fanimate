@@ -238,6 +238,25 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
         if let Some(b) = shell.editor.selected_bone().filter(|b| b.layer == id) {
             bone(ui, shell, b);
         }
+        rig_health(ui, shell, id);
+    }
+}
+
+/// The rig health check for a bone layer and the layers inside it.
+fn rig_health(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
+    let doc = &shell.editor.doc;
+    let findings: Vec<String> = fanimate_core::health::check(doc)
+        .into_iter()
+        .filter(|f| doc.is_within(f.layer, id))
+        .map(|f| f.message)
+        .collect();
+    ui.add_space(8.0);
+    heading(ui, shell, "Rig health");
+    if findings.is_empty() {
+        ui.label(RichText::new("No problems found.").color(shell.palette.success));
+    }
+    for f in findings {
+        ui.label(RichText::new(f).color(shell.palette.keyframe));
     }
 }
 

@@ -8,7 +8,7 @@ Fanimate is a free, open-source 2D character animation app. It keeps what animat
 
 **One-line pitch:** Moho's rigging, Harmony's drawing and pipeline, Animate's ease of use. Free, on every platform, with nothing locked away.
 
-**Where we are:** Phase 1 (Foundation). M1 (engine spike) is done on Windows, waiting only for macOS and Linux benchmark numbers on the [reference hardware](docs/reference-hardware.md). M2 (Draw) is built: drawing, point and pen tools, booleans, point keyframes, timeline key editing, per-layer undo history and crash recovery are in; the usability pass with an artist and the exit check remain. Status lives in the "Status" section of [docs/roadmap/phase-1.md](docs/roadmap/phase-1.md). Update that section when you finish milestone work.
+**Where we are:** Phase 1 (Foundation). M1 (engine spike) is done on Windows, waiting only for macOS and Linux benchmark numbers on the [reference hardware](docs/reference-hardware.md). M2 (Draw) and M3 (Rig) are built: drawing, point and pen tools, booleans, point keyframes, timeline key editing, per-layer undo history, crash recovery, bones with IK, smooth binding, Smart Bones, actions, image layers and PSD import are in; their exit checks with testers remain. Status lives in the "Status" section of [docs/roadmap/phase-1.md](docs/roadmap/phase-1.md). Update that section when you finish milestone work.
 
 ### Read these before non-trivial work
 
@@ -84,6 +84,9 @@ Key facts:
 - A brush stroke is an ordinary shape: its path is the centreline and `Shape::widths` the width profile (one value per on-curve point). Anything that adds or removes points must keep `widths` **and `path_keys`** in step (`Shape::remove_points`, `insert_point` and `extend_from` do). Every point key has the same commands as the shape's path; edit points through `Shape::path_at` / `set_path_at` so the auto-key rule holds.
 - **Undo history is shared per top-level layer** (`fanimate_fnm::HistoryState`): a state reuses the `Arc` of every layer unchanged since the previous one. Keep it that way (capture with `HistoryState::capture` and a previous state), or the journal rewrites every layer on every step. Code that needs a shape's index uses `DrawItem::index`, never pointer comparison: a shape with point keys is drawn from a per-frame copy.
 
+- **Posing a bone always keys it.** A bone angle's `base` is the rest pose that bound artwork is measured from, so Manipulate Bones sets keys even on unkeyed bones (the one exception to the auto-key rule); Select Bone edits the rest pose.
+- **Actions are edited in place.** `Document::enter_action` swaps an action's keys into the bone layer and `action_edit` holds the timeline's keys aside; anything written to disk goes through `Document::mainline()` (`fanimate_fnm::save` and the journal already do). Smart Bones are not applied to the layer whose action is open.
+- **Pictures** live in `Document::media` by content-derived name (`MediaFile::name_for`) and on disk in the project's `media/` folder. Only names that pass `fanimate_fnm::is_media_name` are ever read or written.
 - Document space has **y pointing down**, angles in **radians**, positive is clockwise on screen. Frames are integers; frame 0 is the first; negative keyframes are invalid.
 - Layers are drawn first to last (last is on top). The Layers and Timeline panels list them **top of stack first** (`Editor::display_rows`).
 - A channel's `base` is its value when unkeyed and, for bones, the rest pose.

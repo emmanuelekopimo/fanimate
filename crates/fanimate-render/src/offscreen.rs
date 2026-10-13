@@ -327,8 +327,10 @@ mod tests {
         img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
             .unwrap();
         let name = fanimate_core::MediaFile::name_for(&bytes, "png");
-        doc.media
-            .insert(name.clone(), std::sync::Arc::new(fanimate_core::MediaFile { bytes }));
+        doc.media.insert(
+            name.clone(),
+            std::sync::Arc::new(fanimate_core::MediaFile { bytes }),
+        );
         let blue = doc.new_layer(
             "blue",
             fanimate_core::LayerKind::Image(fanimate_core::Image::new(name, 50.0, 100.0)),

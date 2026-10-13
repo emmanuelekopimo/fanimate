@@ -15,6 +15,7 @@ pub mod boolean;
 pub mod brush;
 pub mod color;
 pub mod eval;
+pub mod health;
 pub mod media;
 pub mod path;
 pub mod points;
