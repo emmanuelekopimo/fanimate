@@ -242,6 +242,7 @@ impl Writer {
         for layer in doc.layers.iter().filter(|l| !unchanged(l.id)) {
             write_json_atomic(&self.project.join(layer_file(layer)), layer)?;
         }
+        crate::io::write_media(doc, &self.project)?;
         write_json_atomic(&self.project.join("document.json"), &document_file(doc))?;
         if let Some(previous) = previous {
             for gone in previous
@@ -276,7 +277,13 @@ impl Recoverable {
     /// repairs is left out rather than risk undoing into a broken state;
     /// the project itself is unaffected.
     pub fn load_history(&self) -> Option<HistoryRecord> {
-        let record = history::read(&self.dir.join(HISTORY)).ok()?;
+        let mut record = history::read(&self.dir.join(HISTORY)).ok()?;
+        // pictures are not in the history's own files; every picture the
+        // session used is kept in the copy's media folder
+        let media = read_media_dir(&self.dir.join(PROJECT));
+        for state in &mut record.states {
+            std::sync::Arc::make_mut(&mut state.meta).media = media.clone();
+        }
         let sound = record.is_consistent()
             && record.states.iter().all(|s| {
                 crate::validate(&s.document())
@@ -292,6 +299,23 @@ impl Recoverable {
     pub fn discard(&self) {
         let _ = fs::remove_dir_all(&self.dir);
     }
+}
+
+/// Every picture in a project folder's `media` folder.
+fn read_media_dir(project: &Path) -> fanimate_core::Media {
+    let mut media = fanimate_core::Media::new();
+    let Ok(entries) = fs::read_dir(project.join("media")) else {
+        return media;
+    };
+    for entry in entries.flatten() {
+        let name = format!("media/{}", entry.file_name().to_string_lossy());
+        if crate::is_media_name(&name)
+            && let Ok(bytes) = fs::read(entry.path())
+        {
+            media.insert(name, std::sync::Arc::new(fanimate_core::MediaFile { bytes }));
+        }
+    }
+    media
 }
 
 /// Sessions under `root` that ended without closing (their lock is free)

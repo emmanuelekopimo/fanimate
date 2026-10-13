@@ -1226,6 +1226,8 @@ version = "0.0.6"
 dependencies = [
  "fanimate-core",
  "fanimate-fnm",
+ "image",
+ "psd",
  "serde",
  "serde_json",
 ]
@@ -1246,6 +1248,7 @@ version = "0.0.6"
 dependencies = [
  "bytemuck",
  "fanimate-core",
+ "image",
  "log",
  "lyon",
  "pollster 1.0.1",
@@ -1693,6 +1696,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
@@ -2779,6 +2784,15 @@ name = "profiling"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d595e54a326bc53c1c197b32d295e14b169e3cfeaa8dc82b529f947fba6bcf5"
+
+[[package]]
+name = "psd"
+version = "0.3.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9a25f9b8cfffd65d911baf31a033239f7a0facb755faa2481575b70db5dc9195"
+dependencies = [
+ "thiserror 1.0.69",
+]
 
 [[package]]
 name = "pxfm"

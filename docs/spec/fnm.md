@@ -19,14 +19,20 @@ A project is a folder whose name ends in `.fnm`:
 scene.fnm/
 ├── manifest.json
 ├── document.json
-└── layers/
-    ├── 0002.json
-    └── 0005.json
+├── layers/
+│   ├── 0002.json
+│   └── 0005.json
+└── media/
+    └── 9f3a…-20481.png
 ```
 
 A single-file form (the same folder in a zip archive) is planned and will get its own extension.
 
 All files are UTF-8 JSON. Whitespace is not significant; Fanimate writes them indented, with a final newline.
+
+## Media files
+
+Pictures used by image layers live in the `media` folder, as PNG or JPEG files. Fanimate names each file after its content (a hash and the size in bytes), so the same picture is stored once and a file never changes once written. A file no layer uses is not saved. A missing picture does not stop the project opening: the layer shows a grey placeholder.
 
 ## `manifest.json`
 
@@ -88,7 +94,7 @@ Each file in `layers/` holds one top-level layer. Child layers of groups and bon
 | `visible` | boolean | Optional, default `true` |
 | `opacity` | [channel](#channels) of number | 0 to 1. Multiplies with ancestors' opacity. |
 | `transform` | object | `position` (channel of [vector](#vectors)), `rotation` (channel of number, radians), `scale` (channel of vector) |
-| `type` | string | `"vector"`, `"group"` or `"bone"`; decides the remaining fields |
+| `type` | string | `"vector"`, `"group"`, `"bone"` or `"image"` (version 3); decides the remaining fields |
 
 A layer's transform applies scale, then rotation, then position, relative to its parent.
 
@@ -103,6 +109,20 @@ A layer's transform applies scale, then rotation, then position, relative to its
 | Field | Type | Meaning |
 |---|---|---|
 | `children` | array of layers | Drawn first to last |
+
+### `"type": "image"`
+
+A picture, such as one layer of an imported Photoshop file. Version 3.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `media` | string | The picture file, relative to the project folder: `media/` and a file name of letters, digits, `-`, `_` and `.` only. Readers must not read any other path. |
+| `width`, `height` | number | Size in document units. The picture spans (0, 0) to (width, height) in the layer's space. Positive. |
+| `grid` | `[columns, rows]` | Optional, default `[1, 1]`. The mesh the picture bends on: this many cells each way, 1 to 64. |
+| `bone` | integer | Optional. Bone it follows rigidly, as for shapes. |
+| `skin` | array | Optional. [Smooth binding](#smooth-binding) weights, one entry per mesh vertex (`(columns + 1) × (rows + 1)`), row by row from the top left. Takes the place of `bone`. |
+
+The picture is drawn on the mesh: its vertices, evenly spaced over the picture, move with their bones and the picture stretches between them.
 
 ### `"type": "bone"`
 
@@ -336,6 +356,11 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | `skin` outside any bone layer | Warning | Remove the skin |
 | Bone `limits` not a finite range with min ≤ max | Error | Remove the limits |
 | Bone `strength` not a positive number | Warning | Use the default |
+| Image `media` name outside the `media` folder | Error | None; the picture is not read |
+| Image picture file missing | Warning | None; drawn as a grey placeholder |
+| Image size not positive | Error | Set to 100 × 100 |
+| Image `grid` outside 1 to 64 | Error | Clamp it and remove the `skin` |
+| Image `skin` not matching the mesh, or naming missing bones | Error | Remove the `skin` |
 | Action whose `driver` does not exist | Error | Remove the action |
 | Action `length` not positive | Error | Set to 1 |
 | Action keys for a bone that does not exist | Error | Remove those keys |
@@ -357,4 +382,4 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | 0 | Fanimate 0.0.1 | First version: layers, shapes, bones, channels | |
 | 1 | Development builds after Fanimate 0.0.5 (never released) | Shapes may have a stroke width profile (`widths`), written by the brush | Version 0 files need no conversion. A version 0 reader would ignore `widths` and draw brush strokes at one width, so the version was bumped. |
 | 2 | Fanimate 0.0.6 | Shapes may have point keyframes (`path_keys`) | Older files need no conversion. An older reader would ignore `path_keys` and draw animated drawings without their animation, so the version was bumped. |
-| 3 | Fanimate 0.0.7 | Layers may have a label colour (`label`); bones may have `limits`, `pinned` and `strength`; shapes may have a smooth binding (`skin`); bone layers may have actions and Smart Bone actions | Older files need no conversion. An older reader would drop labels and draw smoothly bound artwork unbound, so the version was bumped. |
+| 3 | Fanimate 0.0.7 | Layers may have a label colour (`label`); bones may have `limits`, `pinned` and `strength`; shapes may have a smooth binding (`skin`); bone layers may have actions and Smart Bone actions; image layers and the `media` folder | Older files need no conversion. An older reader would drop labels and draw smoothly bound artwork unbound, so the version was bumped. |

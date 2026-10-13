@@ -193,8 +193,7 @@ fn bench(args: &[String]) -> CmdResult {
         let t0 = Instant::now();
         evaluator.evaluate_into(&doc, frame, &mut items);
         let t1 = Instant::now();
-        mesh.vertices.clear();
-        mesh.indices.clear();
+        tess.clear(&mut mesh);
         tess.canvas(&doc, &mut mesh);
         tess.draw_items(&items, &mut mesh);
         let t2 = Instant::now();

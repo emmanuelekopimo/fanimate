@@ -42,6 +42,7 @@ pub enum Icon {
     Intersect,
     History,
     Action,
+    ImageLayer,
 }
 
 macro_rules! lucide {
@@ -104,6 +105,7 @@ impl Icon {
             Self::Intersect => lucide!("squares-intersect"),
             Self::History => lucide!("history"),
             Self::Action => lucide!("clapperboard"),
+            Self::ImageLayer => lucide!("image"),
         }
     }
 }
@@ -241,6 +243,7 @@ mod tests {
             Icon::Intersect,
             Icon::History,
             Icon::Action,
+            Icon::ImageLayer,
         ]);
         icons
     }

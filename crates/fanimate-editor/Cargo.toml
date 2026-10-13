@@ -12,6 +12,8 @@ authors.workspace = true
 fanimate-core.workspace = true
 fanimate-fnm.workspace = true
 serde.workspace = true
+image.workspace = true
+psd.workspace = true
 serde_json.workspace = true
 
 [lints]

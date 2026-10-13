@@ -35,7 +35,7 @@ pub struct CanvasGpu {
 impl CanvasGpu {
     pub fn new(rs: &RenderState) -> Self {
         Self {
-            renderer: Renderer::new(&rs.device, RENDER_FORMAT, 4),
+            renderer: Renderer::new(&rs.device, &rs.queue, RENDER_FORMAT, 4),
             target: None,
             evaluator: Evaluator::default(),
             tess: Tessellator::new(),
@@ -73,12 +73,12 @@ impl CanvasGpu {
                 layer: LayerId(0),
                 index: 0,
                 shape: std::borrow::Cow::Borrowed(shape),
+                image: None,
                 transform: Affine2::IDENTITY,
                 opacity: 1.0,
             });
         }
-        self.mesh.vertices.clear();
-        self.mesh.indices.clear();
+        self.tess.clear(&mut self.mesh);
         self.tess.tolerance = 0.25 / view.zoom.max(0.01);
         self.tess.canvas(doc, &mut self.mesh);
         self.tess.draw_items(&items, &mut self.mesh);
@@ -94,6 +94,8 @@ impl CanvasGpu {
             },
             view,
             &self.mesh,
+            &self.tess.runs,
+            &doc.media,
             pasteboard,
         );
         target.id

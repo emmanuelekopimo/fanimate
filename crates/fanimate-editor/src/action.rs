@@ -10,6 +10,8 @@ pub enum Action {
     OpenSample(Sample),
     Save,
     SaveAs,
+    /// Import pictures or a Photoshop file.
+    Import,
     Quit,
     // Edit
     Undo,
@@ -97,6 +99,7 @@ impl Action {
             OpenSample(Sample::StressTest) => "Open Sample: Stress Test",
             Save => "Save",
             SaveAs => "Save As…",
+            Import => "Import…",
             Quit => "Quit",
             Undo => "Undo",
             Redo => "Redo",
@@ -166,6 +169,7 @@ impl Action {
             Open,
             Save,
             SaveAs,
+            Import,
             Quit,
             Undo,
             Redo,

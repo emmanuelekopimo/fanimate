@@ -12,17 +12,28 @@ use lyon::tessellation::{
 /// The path attribute holding the width profile.
 const WIDTH: AttributeIndex = 0;
 
-/// `[x, y, r, g, b, a]`: document-space position and linear, premultiplied
-/// colour. A plain array keeps the vertex `Pod` without unsafe code.
-pub type Vertex = [f32; 6];
+/// `[x, y, r, g, b, a, u, v]`: document-space position, linear
+/// premultiplied colour, and texture coordinate (0, 0 for flat colour). A
+/// plain array keeps the vertex `Pod` without unsafe code.
+pub type Vertex = [f32; 8];
 
 /// Triangle mesh ready for upload.
 pub type Mesh = VertexBuffers<Vertex, u32>;
+
+/// From index `first` on, triangles are drawn with this picture (`None`:
+/// flat colour), until the next run.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Run {
+    pub first: u32,
+    pub media: Option<String>,
+}
 
 pub struct Tessellator {
     fill: FillTessellator,
     stroke: StrokeTessellator,
     path: LyonPath,
+    /// Where each picture's triangles start in the mesh, in order.
+    pub runs: Vec<Run>,
     /// Maximum distance between a curve and its flattened version, in
     /// document units. Lower is smoother and slower.
     pub tolerance: f32,
@@ -34,6 +45,7 @@ impl Default for Tessellator {
             fill: FillTessellator::new(),
             stroke: StrokeTessellator::new(),
             path: LyonPath::new(),
+            runs: Vec::new(),
             tolerance: 0.25,
         }
     }
@@ -44,8 +56,36 @@ impl Tessellator {
         Self::default()
     }
 
+    /// Empty `mesh` and the runs, to start a frame.
+    pub fn clear(&mut self, mesh: &mut Mesh) {
+        mesh.vertices.clear();
+        mesh.indices.clear();
+        self.runs.clear();
+    }
+
+    /// Start drawing with `media` (`None`: flat colour) from here on.
+    fn switch(&mut self, mesh: &Mesh, media: Option<&str>) {
+        if self
+            .runs
+            .last()
+            .map_or(media.is_none(), |r| r.media.as_deref() == media)
+        {
+            return;
+        }
+        let first = mesh.indices.len() as u32;
+        match self.runs.last_mut() {
+            // a run that never drew anything is replaced
+            Some(last) if last.first == first => last.media = media.map(str::to_owned),
+            _ => self.runs.push(Run {
+                first,
+                media: media.map(str::to_owned),
+            }),
+        }
+    }
+
     /// The document's canvas rectangle in its background colour.
     pub fn canvas(&mut self, doc: &Document, mesh: &mut Mesh) {
+        self.switch(mesh, None);
         let c = doc.background.to_linear_premultiplied();
         let base = mesh.vertices.len() as u32;
         for p in [
@@ -54,7 +94,7 @@ impl Tessellator {
             doc.size(),
             Vec2::new(0.0, doc.height),
         ] {
-            mesh.vertices.push([p.x, p.y, c[0], c[1], c[2], c[3]]);
+            mesh.vertices.push([p.x, p.y, c[0], c[1], c[2], c[3], 0.0, 0.0]);
         }
         mesh.indices
             .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -64,6 +104,25 @@ impl Tessellator {
     /// Shapes that fail to tessellate are skipped and logged.
     pub fn draw_items(&mut self, items: &[DrawItem<'_>], mesh: &mut Mesh) {
         for item in items {
+            if let Some(image) = &item.image {
+                self.switch(mesh, Some(image.media));
+                let c = color(Color::WHITE, item.opacity);
+                let base = mesh.vertices.len() as u32;
+                for (p, uv) in image.vertices.iter() {
+                    let w = item.transform.transform_point2(*p);
+                    mesh.vertices.push([w.x, w.y, c[0], c[1], c[2], c[3], uv.x, uv.y]);
+                }
+                let [cols, rows] = image.cells;
+                let at = |c: u32, r: u32| base + r * (cols + 1) + c;
+                for r in 0..rows {
+                    for c in 0..cols {
+                        let (a, b, d, e) = (at(c, r), at(c + 1, r), at(c, r + 1), at(c + 1, r + 1));
+                        mesh.indices.extend([a, b, e, a, e, d]);
+                    }
+                }
+                continue;
+            }
+            self.switch(mesh, None);
             let style = item.shape.style;
             if style.fill.is_none() && style.stroke.is_none() {
                 continue;
@@ -85,7 +144,7 @@ impl Tessellator {
                     &opts,
                     &mut BuffersBuilder::new(mesh, |v: FillVertex| {
                         let p = v.position();
-                        [p.x, p.y, c[0], c[1], c[2], c[3]]
+                        [p.x, p.y, c[0], c[1], c[2], c[3], 0.0, 0.0]
                     }),
                 );
                 if let Err(e) = result {
@@ -109,7 +168,7 @@ impl Tessellator {
                     &opts,
                     &mut BuffersBuilder::new(mesh, |v: StrokeVertex| {
                         let p = v.position();
-                        [p.x, p.y, c[0], c[1], c[2], c[3]]
+                        [p.x, p.y, c[0], c[1], c[2], c[3], 0.0, 0.0]
                     }),
                 );
                 if let Err(e) = result {
@@ -215,6 +274,7 @@ mod tests {
             layer: fanimate_core::LayerId(1),
             index: 0,
             shape: std::borrow::Cow::Borrowed(&shape),
+            image: None,
             transform: Affine2::IDENTITY,
             opacity: 1.0,
         };

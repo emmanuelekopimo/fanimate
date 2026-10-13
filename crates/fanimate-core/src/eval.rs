@@ -15,11 +15,24 @@ pub struct DrawItem<'a> {
     pub index: usize,
     /// The shape as drawn on this frame: borrowed from the document, or,
     /// for a shape with point keys, a copy with the path for the frame.
+    /// For an image, its outline, filled with nothing, so it can be picked.
     pub shape: Cow<'a, Shape>,
+    /// For an image layer, the picture and its mesh.
+    pub image: Option<ImageItem<'a>>,
     /// Shape space to document space.
     pub transform: Affine2,
     /// Combined opacity of the shape's layer and all its ancestors.
     pub opacity: f32,
+}
+
+/// An image to draw: the media file's name and the mesh, its vertices in
+/// the layer's space (bent by bones on this frame) with texture
+/// coordinates, row by row.
+#[derive(Clone, Debug)]
+pub struct ImageItem<'a> {
+    pub media: &'a str,
+    pub cells: [u32; 2],
+    pub vertices: Vec<(glam::Vec2, glam::Vec2)>,
 }
 
 /// Evaluate `doc` at `frame` (which may be fractional, for motion blur or
@@ -116,6 +129,7 @@ impl Evaluator {
                             layer: layer.id,
                             index,
                             shape: drawn,
+                            image: None,
                             transform,
                             opacity,
                         });
@@ -123,6 +137,33 @@ impl Evaluator {
                 }
                 LayerKind::Group { children } => {
                     self.visit(children, frame, world, opacity, rig, out);
+                }
+                LayerKind::Image(image) => {
+                    let mut vertices = image.vertices();
+                    let mut transform = world;
+                    if let Some((r, rel)) = rig {
+                        let skins = &self.skins[r.depth];
+                        if let Some(weights) = image.valid_skin() {
+                            let inv = rel.inverse();
+                            for ((p, _), w) in vertices.iter_mut().zip(weights) {
+                                *p = (inv * crate::bones::blend(skins, w) * rel).transform_point2(*p);
+                            }
+                        } else if let Some(skin) = image.bone.and_then(|b| skins.get(b)) {
+                            transform = r.world * *skin * rel;
+                        }
+                    }
+                    out.push(DrawItem {
+                        layer: layer.id,
+                        index: 0,
+                        shape: Cow::Owned(image_outline(&vertices, image.cells())),
+                        image: Some(ImageItem {
+                            media: &image.media,
+                            cells: image.cells(),
+                            vertices,
+                        }),
+                        transform,
+                        opacity,
+                    });
                 }
                 LayerKind::Bone { skeleton, children } => {
                     let depth = rig.map_or(0, |(r, _)| r.depth + 1);
@@ -181,6 +222,26 @@ impl Evaluator {
             }
         }
     }
+}
+
+/// The mesh's border as a closed shape filled with nothing visible, so
+/// clicking inside an image picks it.
+fn image_outline(vertices: &[(glam::Vec2, glam::Vec2)], [cols, rows]: [u32; 2]) -> Shape {
+    let at = |c: u32, r: u32| vertices[(r * (cols + 1) + c) as usize].0;
+    let mut border = Vec::new();
+    border.extend((0..=cols).map(|c| at(c, 0)));
+    border.extend((1..=rows).map(|r| at(cols, r)));
+    border.extend((0..cols).rev().map(|c| at(c, rows)));
+    border.extend((1..rows).rev().map(|r| at(0, r)));
+    let mut path = crate::Path::new().move_to(border[0]);
+    for p in &border[1..] {
+        path = path.line_to(*p);
+    }
+    Shape::new(
+        "Image",
+        path.close(),
+        crate::Style::fill(crate::Color::TRANSPARENT),
+    )
 }
 
 /// Add the point changes of the Smart Bone actions playing on `frames` to
@@ -397,6 +458,23 @@ mod tests {
         assert!(pts[1].abs_diff_eq(Vec2::new(10.0, 0.0), 1e-4));
         assert!(pts[2].abs_diff_eq(Vec2::new(10.0, 10.0), 1e-4), "{:?}", pts[2]);
         assert_eq!(items[0].transform, Affine2::IDENTITY);
+    }
+
+    #[test]
+    fn image_layers_draw_their_mesh_and_can_be_picked() {
+        let mut doc = Document::new("t", 100.0, 100.0, 24.0);
+        let mut img = crate::media::Image::new("media/x.png", 40.0, 20.0);
+        img.grid = [2, 2];
+        let layer = doc
+            .new_layer("pic", LayerKind::Image(img))
+            .with_transform(AnimTransform::at(Vec2::new(10.0, 0.0)));
+        doc.layers.push(layer);
+        let items = evaluate(&doc, 0.0);
+        let image = items[0].image.as_ref().unwrap();
+        assert_eq!(image.vertices.len(), 9);
+        assert_eq!(image.media, "media/x.png");
+        assert!(items[0].shape.contains(Vec2::new(20.0, 10.0), 0.0));
+        assert!(!items[0].shape.contains(Vec2::new(60.0, 10.0), 0.0));
     }
 
     #[test]

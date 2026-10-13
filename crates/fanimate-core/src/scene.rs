@@ -34,6 +34,10 @@ pub struct Document {
     /// a saved project: saving writes [`Document::mainline`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub action_edit: Option<crate::actions::ActionEdit>,
+    /// Image files used by image layers (see [`crate::media`]). Saved as
+    /// files beside the layers, not in the document's own data.
+    #[serde(skip)]
+    pub media: crate::media::Media,
 }
 
 impl Document {
@@ -49,6 +53,7 @@ impl Document {
             layers: Vec::new(),
             next_layer_id: 1,
             action_edit: None,
+            media: Default::default(),
         }
     }
 
@@ -325,7 +330,7 @@ impl Layer {
         match &self.kind {
             LayerKind::Vector { shapes } => shapes.iter().for_each(|s| f(&s.path_keys)),
             LayerKind::Bone { skeleton, .. } => skeleton.bones.iter().for_each(|b| f(&b.angle.keys)),
-            LayerKind::Group { .. } => {}
+            LayerKind::Group { .. } | LayerKind::Image(_) => {}
         }
     }
 
@@ -338,7 +343,7 @@ impl Layer {
         match &mut self.kind {
             LayerKind::Vector { shapes } => shapes.iter_mut().for_each(|s| f(&mut s.path_keys)),
             LayerKind::Bone { skeleton, .. } => skeleton.bones.iter_mut().for_each(|b| f(&mut b.angle.keys)),
-            LayerKind::Group { .. } => {}
+            LayerKind::Group { .. } | LayerKind::Image(_) => {}
         }
     }
 
@@ -365,6 +370,8 @@ pub enum LayerKind {
         skeleton: Skeleton,
         children: Vec<Layer>,
     },
+    /// A picture, which bones can bend.
+    Image(crate::media::Image),
 }
 
 impl LayerKind {
@@ -374,14 +381,14 @@ impl LayerKind {
 
     pub fn children(&self) -> Option<&Vec<Layer>> {
         match self {
-            Self::Vector { .. } => None,
+            Self::Vector { .. } | Self::Image(_) => None,
             Self::Group { children } | Self::Bone { children, .. } => Some(children),
         }
     }
 
     pub fn children_mut(&mut self) -> Option<&mut Vec<Layer>> {
         match self {
-            Self::Vector { .. } => None,
+            Self::Vector { .. } | Self::Image(_) => None,
             Self::Group { children } | Self::Bone { children, .. } => Some(children),
         }
     }

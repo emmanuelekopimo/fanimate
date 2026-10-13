@@ -24,7 +24,7 @@ pub mod journal;
 pub mod validate;
 
 pub use history::{HistoryRecord, HistoryState};
-pub use io::{FORMAT_NAME, FORMAT_VERSION, load, load_and_repair, save};
+pub use io::{FORMAT_NAME, FORMAT_VERSION, is_media_name, load, load_and_repair, save};
 pub use journal::{Journal, Recoverable, SessionInfo, find_recoverable};
 pub use validate::{Issue, Report, Severity, repair, validate};
 

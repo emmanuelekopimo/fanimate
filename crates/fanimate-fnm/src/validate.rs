@@ -86,6 +86,8 @@ pub fn repair(doc: &mut Document) -> Report {
 struct Checker {
     repair: bool,
     report: Report,
+    /// Names of the pictures the document holds.
+    media: std::collections::BTreeSet<String>,
 }
 
 impl Checker {
@@ -93,6 +95,7 @@ impl Checker {
         Self {
             repair,
             report: Report::default(),
+            media: Default::default(),
         }
     }
 
@@ -106,6 +109,7 @@ impl Checker {
     }
 
     fn run(mut self, doc: &mut Document) -> Report {
+        self.media = doc.media.keys().cloned().collect();
         self.document(doc);
         self.layer_ids(doc);
         let end = doc.end;
@@ -272,6 +276,7 @@ impl Checker {
                     self.layer(child, end, bones);
                 }
             }
+            LayerKind::Image(img) => self.image(img, &loc, bones),
             LayerKind::Bone { skeleton, children } => {
                 for i in 0..skeleton.bones.len() {
                     let bone = &mut skeleton.bones[i];
@@ -384,6 +389,87 @@ impl Checker {
                     } else if *w < 0.0 {
                         *w = 0.0;
                     }
+                }
+            }
+        }
+    }
+
+    /// An image layer: a picture the project holds, a sensible size and
+    /// mesh, and bone references that exist.
+    fn image(&mut self, img: &mut fanimate_core::Image, loc: &str, bones: Option<usize>) {
+        if !crate::is_media_name(&img.media) {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!(
+                    "picture name {:?} is not inside the project's media folder; it is not loaded",
+                    img.media
+                ),
+                false,
+            );
+        } else if !self.media.contains(&img.media) {
+            self.issue(
+                Severity::Warning,
+                loc,
+                format!(
+                    "picture {} is missing; the layer shows a grey placeholder",
+                    img.media
+                ),
+                false,
+            );
+        }
+        if !(img.width.is_finite() && img.width > 0.0 && img.height.is_finite() && img.height > 0.0) {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!("size {}x{} is not positive", img.width, img.height),
+                true,
+            );
+            if self.repair {
+                img.width = 100.0;
+                img.height = 100.0;
+            }
+        }
+        if img.grid != img.cells() {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!("mesh of {}x{} cells is out of range", img.grid[0], img.grid[1]),
+                true,
+            );
+            if self.repair {
+                img.grid = img.cells();
+                img.skin = None;
+            }
+        }
+        let n = bones.unwrap_or(0);
+        if img.bone.is_some_and(|b| b >= n) {
+            self.issue(
+                Severity::Warning,
+                loc,
+                "is bound to a bone that does not exist; it will not move with the rig".into(),
+                true,
+            );
+            if self.repair {
+                img.bone = None;
+            }
+        }
+        if let Some(skin) = &img.skin {
+            let bad = img.valid_skin().is_none()
+                || bones.is_none()
+                || skin
+                    .iter()
+                    .flatten()
+                    .any(|(b, w)| *b >= n || !(w.is_finite() && *w >= 0.0));
+            if bad {
+                self.issue(
+                    Severity::Error,
+                    loc,
+                    "mesh weights do not match the mesh or name missing bones; they are removed".into(),
+                    true,
+                );
+                if self.repair {
+                    img.skin = None;
                 }
             }
         }
@@ -787,6 +873,30 @@ mod tests {
         };
         assert_eq!(skeleton.actions.len(), 1);
         assert!(skeleton.actions[0].bones.is_empty());
+    }
+
+    #[test]
+    fn image_layers_are_checked() {
+        let mut doc = rigged();
+        let mut img = fanimate_core::Image::new("../outside.png", f32::NAN, 10.0);
+        img.grid = [0, 2];
+        let layer = doc.new_layer("pic", LayerKind::Image(img));
+        doc.layers.push(layer);
+        let report = validate(&doc);
+        assert_eq!(report.issues.len(), 3, "{report}");
+        repair(&mut doc);
+        // the bad name stays reported: there is no safe repair
+        assert_eq!(validate(&doc).issues.len(), 1);
+        let ok = fanimate_core::Image::new("media/a.png", 1.0, 1.0);
+        let layer = doc.new_layer("pic2", LayerKind::Image(ok));
+        doc.layers.push(layer);
+        // missing picture: a warning
+        assert!(
+            validate(&doc)
+                .issues
+                .iter()
+                .any(|i| i.severity == Severity::Warning)
+        );
     }
 
     #[test]

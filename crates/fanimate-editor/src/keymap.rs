@@ -179,6 +179,8 @@ const FANIMATE: &[(&str, Action)] = &[
     ("Ctrl+O", Open),
     ("Ctrl+S", Save),
     ("Ctrl+Shift+S", SaveAs),
+    // Adobe Animate's Import to Stage
+    ("Ctrl+R", Import),
     ("Ctrl+Q", Quit),
     // Edit
     ("Ctrl+Z", Undo),

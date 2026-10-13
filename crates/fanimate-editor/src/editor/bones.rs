@@ -370,6 +370,22 @@ impl Editor {
         out
     }
 
+    /// Selected image layers inside a bone layer, with that bone layer.
+    fn image_targets(&self) -> Vec<(LayerId, LayerId)> {
+        self.selection
+            .iter()
+            .filter(|id| matches!(self.doc.find(**id).map(|l| &l.kind), Some(LayerKind::Image(_))))
+            .filter_map(|id| Some((*id, self.enclosing_rig(*id)?)))
+            .collect()
+    }
+
+    fn image_mut(&mut self, id: LayerId) -> Option<&mut fanimate_core::Image> {
+        match &mut self.doc.find_mut(id)?.kind {
+            LayerKind::Image(img) => Some(img),
+            _ => None,
+        }
+    }
+
     /// The nearest bone layer around `id`.
     pub fn enclosing_rig(&self, id: LayerId) -> Option<LayerId> {
         let mut current = self.doc.locate(id).and_then(|(p, _)| p);
@@ -400,10 +416,16 @@ impl Editor {
             .into_iter()
             .filter(|t| t.1 == bone.layer)
             .collect();
-        if targets.is_empty() {
+        let images: Vec<LayerId> = self
+            .image_targets()
+            .into_iter()
+            .filter(|t| t.1 == bone.layer)
+            .map(|t| t.0)
+            .collect();
+        if targets.is_empty() && images.is_empty() {
             self.set_status(
                 StatusKind::Info,
-                "Select a vector layer inside the bone layer, or points on its shapes",
+                "Select a vector or image layer inside the bone layer, or points on its shapes",
             );
             return false;
         }
@@ -424,6 +446,14 @@ impl Editor {
             })
             .collect();
         self.checkpoint("Bind to bone");
+        // pictures cannot be re-drawn in the rest pose, so they bind as
+        // they are in it
+        for id in images {
+            if let Some(img) = self.image_mut(id) {
+                img.bone = Some(bone.bone);
+                img.skin = None;
+            }
+        }
         let mut n = 0;
         for (id, shapes, to_rest) in moves {
             for_shapes(self, id, &shapes, |s| {
@@ -449,12 +479,37 @@ impl Editor {
     /// it in the rest pose, with weights made automatically.
     pub(super) fn bind_smoothly(&mut self) -> bool {
         let targets = self.bind_targets();
-        if targets.is_empty() {
+        let images = self.image_targets();
+        if targets.is_empty() && images.is_empty() {
             self.set_status(
                 StatusKind::Info,
-                "Select a vector layer inside a bone layer, or points on its shapes",
+                "Select a vector or image layer inside a bone layer, or points on its shapes",
             );
             return false;
+        }
+        // pictures bend on a mesh: 8 by 8 cells unless set already
+        let mut image_weights: Vec<(LayerId, [u32; 2], bones::Skin)> = Vec::new();
+        for (id, rig) in &images {
+            let Some(skeleton) = self.skeleton(*rig) else {
+                continue;
+            };
+            let Some(LayerKind::Image(img)) = self.doc.find(*id).map(|l| &l.kind) else {
+                continue;
+            };
+            if skeleton.bones.is_empty() {
+                continue;
+            }
+            let mut img = img.clone();
+            if img.cells() == [1, 1] {
+                img.grid = [8, 8];
+            }
+            let rel = self.layer_to_rig(*id, *rig);
+            let pts: Vec<Vec2> = img
+                .vertices()
+                .iter()
+                .map(|(p, _)| rel.transform_point2(*p))
+                .collect();
+            image_weights.push((*id, img.cells(), bones::auto_weights(skeleton, &pts, 3)));
         }
         let mut weights: Vec<(LayerId, usize, bones::Skin)> = Vec::new();
         for (id, rig, shapes) in &targets {
@@ -478,12 +533,19 @@ impl Editor {
                 weights.push((*id, i, bones::auto_weights(skeleton, &pts, 3)));
             }
         }
-        if weights.is_empty() {
+        if weights.is_empty() && image_weights.is_empty() {
             self.set_status(StatusKind::Info, "The bone layer has no bones yet");
             return false;
         }
         self.checkpoint("Bind smoothly");
-        let n = weights.len();
+        let n = weights.len() + image_weights.len();
+        for (id, grid, w) in image_weights {
+            if let Some(img) = self.image_mut(id) {
+                img.grid = grid;
+                img.skin = Some(w);
+                img.bone = None;
+            }
+        }
         for (id, i, w) in weights {
             if let Some(s) = self.point_shape_mut((id, i)) {
                 s.skin = Some(w);
@@ -499,16 +561,25 @@ impl Editor {
 
     pub(super) fn unbind(&mut self) -> bool {
         let targets = self.bind_targets();
+        let images = self.image_targets();
         let bound = targets.iter().any(|(id, _, shapes)| {
             shapes.iter().any(|&i| {
                 self.point_shape((*id, i))
                     .is_some_and(|s| s.bone.is_some() || s.skin.is_some())
             })
+        }) || images.iter().any(|(id, _)| {
+            matches!(self.doc.find(*id).map(|l| &l.kind), Some(LayerKind::Image(i)) if i.bone.is_some() || i.skin.is_some())
         });
         if !bound {
             return false;
         }
         self.checkpoint("Release from bones");
+        for (id, _) in images {
+            if let Some(img) = self.image_mut(id) {
+                img.bone = None;
+                img.skin = None;
+            }
+        }
         for (id, _, shapes) in targets {
             for_shapes(self, id, &shapes, |s| {
                 s.bone = None;
@@ -519,7 +590,7 @@ impl Editor {
     }
 
     pub(super) fn can_bind(&self) -> bool {
-        !self.bind_targets().is_empty()
+        !self.bind_targets().is_empty() || !self.image_targets().is_empty()
     }
 
     // ------------------------------------------------------------------
@@ -707,6 +778,20 @@ fn renumber_bones(layer: &mut fanimate_core::Layer, map: &[Option<usize>]) {
                                 None => false,
                             });
                         }
+                    }
+                }
+            }
+            LayerKind::Image(img) => {
+                img.bone = img.bone.and_then(|b| map.get(b).copied().flatten());
+                if let Some(skin) = &mut img.skin {
+                    for point in skin.iter_mut() {
+                        point.retain_mut(|(b, _)| match map.get(*b).copied().flatten() {
+                            Some(n) => {
+                                *b = n;
+                                true
+                            }
+                            None => false,
+                        });
                     }
                 }
             }
@@ -925,6 +1010,47 @@ mod tests {
         assert_eq!(ed.history.undo_label(), Some("Paint weights"));
         ed.run(Action::Unbind);
         assert!(ed.point_shape((art, 0)).unwrap().skin.is_none());
+    }
+
+    #[test]
+    fn pictures_bind_on_a_mesh_and_bend() {
+        let (mut ed, rig, _) = rig();
+        // a picture over the arm, inside the bone layer
+        let png = {
+            let img = image::RgbaImage::from_pixel(100, 20, image::Rgba([1, 2, 3, 255]));
+            let mut b = Vec::new();
+            img.write_to(&mut std::io::Cursor::new(&mut b), image::ImageFormat::Png)
+                .unwrap();
+            b
+        };
+        ed.selection = vec![rig];
+        let id = ed.import_picture("arm.png", png).unwrap();
+        ed.doc.find_mut(id).unwrap().transform.position.base = Vec2::new(100.0, 90.0);
+        ed.run(Action::BindSmoothly);
+        let LayerKind::Image(img) = &ed.doc.find(id).unwrap().kind else {
+            panic!()
+        };
+        assert_eq!(img.cells(), [8, 8]);
+        assert!(img.valid_skin().is_some());
+        // bend the elbow: the picture's far end moves, its near end stays
+        ed.selection = vec![rig];
+        ed.go_to(3);
+        assert!(ed.begin_pose(Vec2::new(195.0, 100.0), 3.0, true));
+        ed.drag_bone(Vec2::new(150.0, 150.0));
+        ed.end_bone_drag();
+        let items = evaluate(&ed.doc, 3.0);
+        let pic = items.iter().find(|i| i.layer == id).unwrap();
+        let verts = &pic.image.as_ref().unwrap().vertices;
+        let world = |p: Vec2| pic.transform.transform_point2(p);
+        assert!(world(verts[0].0).distance(Vec2::new(100.0, 90.0)) < 0.5);
+        assert!(world(verts[8].0).distance(Vec2::new(200.0, 90.0)) > 20.0);
+        assert!(fanimate_fnm::validate(&ed.doc).is_clean());
+        ed.selection = vec![id];
+        ed.run(Action::Unbind);
+        let LayerKind::Image(img) = &ed.doc.find(id).unwrap().kind else {
+            panic!()
+        };
+        assert!(img.skin.is_none());
     }
 
     #[test]

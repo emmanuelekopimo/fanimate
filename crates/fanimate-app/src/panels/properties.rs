@@ -83,6 +83,7 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
         LayerKind::Vector { .. } => "Vector layer",
         LayerKind::Group { .. } => "Group",
         LayerKind::Bone { .. } => "Bone layer",
+        LayerKind::Image(_) => "Image layer",
     };
     let mut name = l.name.clone();
     let mut visible = l.visible;
@@ -191,6 +192,28 @@ fn layer(ui: &mut egui::Ui, shell: &mut Shell, id: fanimate_core::LayerId) {
             .color(muted),
         );
     });
+    if let Some(l) = shell.editor.doc.find(id)
+        && let LayerKind::Image(img) = &l.kind
+    {
+        ui.add_space(8.0);
+        heading(ui, shell, "Picture");
+        let bound = if img.valid_skin().is_some() {
+            format!(
+                "Bends with the bones on a {}x{} mesh",
+                img.cells()[0],
+                img.cells()[1]
+            )
+        } else if img.bone.is_some() {
+            "Follows one bone".to_owned()
+        } else {
+            "Not bound to bones".to_owned()
+        };
+        ui.label(format!("{:.0} x {:.0} px", img.width, img.height));
+        ui.label(RichText::new(bound).color(muted));
+        if !shell.editor.doc.media.contains_key(&img.media) {
+            ui.label(RichText::new("The picture file is missing.").color(shell.palette.error));
+        }
+    }
     if let Some(l) = shell.editor.doc.find(id)
         && let LayerKind::Bone { skeleton, .. } = &l.kind
     {

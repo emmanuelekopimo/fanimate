@@ -489,6 +489,7 @@ pub fn run_unchecked(ctx: &egui::Context, shell: &mut Shell, action: Action) {
             Action::SaveAs => {
                 save(shell, true);
             }
+            Action::Import => import_dialog(shell),
             Action::Quit => {
                 shell.allow_close = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -510,6 +511,37 @@ pub fn run_unchecked(ctx: &egui::Context, shell: &mut Shell, action: Action) {
 
 fn zoom_by(shell: &mut Shell, factor: f32) {
     shell.view.zoom = (shell.view.zoom * factor).clamp(0.02, 64.0);
+}
+
+/// Pick pictures or a Photoshop file and import them as image layers.
+fn import_dialog(shell: &mut Shell) {
+    let Some(paths) = rfd::FileDialog::new()
+        .set_title("Import pictures or a Photoshop file")
+        .add_filter("Pictures and Photoshop files", &["png", "jpg", "jpeg", "psd"])
+        .pick_files()
+    else {
+        return;
+    };
+    for path in paths {
+        let name = path.display().to_string();
+        let result = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|bytes| {
+            let psd = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("psd"));
+            if psd {
+                shell.editor.import_psd(&name, &bytes)
+            } else {
+                shell.editor.import_picture(&name, bytes)
+            }
+        });
+        if let Err(e) = result {
+            let file = path
+                .file_name()
+                .map_or(name.clone(), |f| f.to_string_lossy().into_owned());
+            shell
+                .editor
+                .set_status(StatusKind::Error, format!("Could not import {file}: {e}"));
+            return;
+        }
+    }
 }
 
 fn open_dialog(shell: &mut Shell) {

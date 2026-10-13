@@ -90,6 +90,8 @@ pub fn file(ui: &mut egui::Ui, shell: &mut Shell) {
     ui.separator();
     items(ui, shell, &[Action::Save, Action::SaveAs]);
     ui.separator();
+    item(ui, shell, Action::Import);
+    ui.separator();
     item(ui, shell, Action::Quit);
 }
 

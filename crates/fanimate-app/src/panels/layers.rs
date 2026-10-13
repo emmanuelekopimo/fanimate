@@ -110,6 +110,7 @@ fn type_icon(kind: &LayerKind) -> Icon {
         LayerKind::Vector { .. } => Icon::VectorLayer,
         LayerKind::Group { .. } => Icon::GroupLayer,
         LayerKind::Bone { .. } => Icon::BoneLayer,
+        LayerKind::Image(_) => Icon::ImageLayer,
     }
 }
 

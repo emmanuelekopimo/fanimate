@@ -19,6 +19,7 @@ mod bones;
 mod booleans;
 mod construct;
 mod draw;
+mod import;
 mod points;
 pub use bones::BoneRef;
 pub use draw::DrawStyle;
@@ -338,7 +339,7 @@ impl Editor {
                 use crate::action::Tool as T;
                 self.set_tool(if bone { T::AddBone } else { T::AddPoint });
             }
-            New | Open | OpenSample(_) | Save | SaveAs | Quit | Preferences | CommandPalette
+            New | Open | OpenSample(_) | Save | SaveAs | Import | Quit | Preferences | CommandPalette
             | LayerProperties | ZoomIn | ZoomOut | FitView | ActualSize => return Outcome::App(action),
         }
         Outcome::Done

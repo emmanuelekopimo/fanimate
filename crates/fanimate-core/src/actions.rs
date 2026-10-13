@@ -321,7 +321,7 @@ fn for_each_shape(layers: &mut [Layer], f: &mut impl FnMut(LayerId, usize, &mut 
                 }
             }
             LayerKind::Group { children } => for_each_shape(children, f),
-            LayerKind::Bone { .. } => {}
+            LayerKind::Bone { .. } | LayerKind::Image(_) => {}
         }
     }
 }
