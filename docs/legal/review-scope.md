@@ -53,7 +53,9 @@ Not needed for 1.0, but worth scoping early: terms of service and privacy policy
 
 | When | What |
 |---|---|
-| Milestone M3 (months 5 to 7) | Sections 1 to 3, before the Moho and Animate importers start in M5 |
-| Milestone M5 (months 9 to 11) | Section 4, once the dependency list is stable |
-| Milestone M6 (months 11 to 12) | Final review of the 1.0 release; section 5 |
+| Milestone M3 (by mid-December 2026) | Sections 1 to 3, before the Moho and Animate importers start in M5; and the video codec question from section 4, which MP4 export in M4 needs |
+| Milestone M5 (February to March 2027) | The rest of section 4, once the dependency list is stable |
+| Milestone M6 (April to June 2027) | Final review of the 1.0 release; section 5 |
+
+Dates follow the [Phase 1 plan](../roadmap/phase-1.md#4-milestones).
 | Before Phase 3 | Section 6 |

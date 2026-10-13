@@ -1,12 +1,12 @@
 # Fanimate Phase 1: Foundation
 
-Companion to the [product vision](../product-vision.md). The brand assets proposed in section 1 live in [`brand/`](../../brand/). Phase 1 runs about 12 months and ends at **Gate 1: version 1.0**. This document starts with the brand, because every screen, installer and website in Phase 1 depends on it, and then breaks the engineering work into workstreams, milestones and acceptance tests.
+Companion to the [product vision](../product-vision.md). The brand assets proposed in section 1 live in [`brand/`](../../brand/). Phase 1 was first planned at about 12 months; it was re-planned in October 2026 to about 8 to 9 (see [section 4.1](#41-re-plan-13-october-2026)). It ends at **Gate 1: version 1.0**. This document starts with the brand, because every screen, installer and website in Phase 1 depends on it, and then breaks the engineering work into workstreams, milestones and acceptance tests.
 
 > **What comes from the vision and what is new.** The scope, the Gate 1 criteria and the performance budget are taken from the product vision. The brand proposals, the milestone order, the task lists and the acceptance tests are new proposals, written so the team can challenge and change them.
 
 ## Status
 
-*Updated 12 October 2026.*
+*Updated 13 October 2026. Target dates for each milestone are in [section 4](#4-milestones).*
 
 | Milestone | Status |
 |---|---|
@@ -241,7 +241,7 @@ Check the licence on every font before bundling, and keep the licence texts in t
 - **Clear space:** the height of the *i* dot on every side.
 - **Minimum size:** icon 16 px (for taskbars and file-type icons), wordmark 80 px wide.
 
-**Name check before committing.** The vision already requires a legal review before 1.0. Do a trademark and domain search for "Fanimate" in Month 1, not Month 12, because every asset below is built on the name. Check the app-store, GitHub, crates.io and PyPI namespaces too.
+**Name check before committing.** The vision already requires a legal review before 1.0. Do a trademark and domain search for "Fanimate" in M0, not M6, because every asset below is built on the name. Check the app-store, GitHub, crates.io and PyPI namespaces too.
 
 ### 1.5 App icon concepts
 
@@ -284,23 +284,23 @@ The app needs its own toolbar and panel icons (the vision requires this to avoid
 
 ### 1.7 Brand asset checklist
 
-Everything below is needed during Phase 1. The first column shows when it is needed.
+Everything below is needed during Phase 1. The first column shows the milestone that needs it (dates in [section 4](#4-milestones)).
 
-| When | Asset | Format | Notes |
+| Needed by | Asset | Format | Notes |
 |---|---|---|---|
-| Month 1 | Name and trademark check | Report | Blocks everything else |
-| Month 1 | Logo (icon, wordmark, lockups) | SVG | Light and dark versions, one-colour version |
-| Month 1 | Colour tokens and theme file | JSON or TOML | Single source of truth, consumed by the UI and website |
-| Month 1 | Repository social card and README banner | PNG 1280×640 | For GitHub; needed when the repo goes public |
-| Month 2 | Favicon and app-icon set | ICO, ICNS, PNG | 16, 32, 48, 64, 128, 256, 512, 1024 px |
-| Month 2 | File-type icons (`.fnm`) | ICO, ICNS, SVG | Icon on a document shape so the file format is recognisable in Explorer and Finder |
-| Month 2 | Brand guidelines | Markdown in repo | Clear space, colours, do and don't, how contributors may use the logo |
-| Month 3 | Splash screen and about dialog | PNG at 1x and 2x | Onion-skin illustration (Concept B) |
-| Month 3 | Website and docs theme | CSS tokens | Reuse the Day and Night tokens |
-| Month 4 | Interface icon set v1 | SVG | About 120 icons, placeholders allowed |
-| Month 6 | Installer art | PNG, BMP | Windows installer banner, macOS DMG background, Flatpak metadata icons |
-| Month 9 | Tutorial and "Coming from Moho / Animate" artwork | SVG | Mascot optional |
-| Month 11 | Release assets | PNG, MP4 | Release banner and the show-reel for 1.0 |
+| M0 | Name and trademark check | Report | Blocks everything else |
+| M0 | Logo (icon, wordmark, lockups) | SVG | Light and dark versions, one-colour version |
+| M0 | Colour tokens and theme file | JSON or TOML | Single source of truth, consumed by the UI and website |
+| M0 | Repository social card and README banner | PNG 1280×640 | For GitHub; needed when the repo goes public |
+| M1 | Favicon and app-icon set | ICO, ICNS, PNG | 16, 32, 48, 64, 128, 256, 512, 1024 px |
+| M1 | File-type icons (`.fnm`) | ICO, ICNS, SVG | Icon on a document shape so the file format is recognisable in Explorer and Finder |
+| M1 | Brand guidelines | Markdown in repo | Clear space, colours, do and don't, how contributors may use the logo |
+| M3 | Interface icon set v1 | SVG | About 120 icons, placeholders allowed; the bone tools need their own icons when they start working |
+| M5 | Splash screen and about dialog | PNG at 1x and 2x | Onion-skin illustration (Concept B) |
+| M5 | Website and docs theme | CSS tokens | Reuse the Day and Night tokens |
+| M5 | Installer art | PNG, BMP | Windows installer banner, macOS DMG background, Flatpak metadata icons |
+| M5 | Tutorial and "Coming from Moho / Animate" artwork | SVG | Mascot optional |
+| M6 | Release assets | PNG, MP4 | Release banner and the show-reel for 1.0 |
 
 **Optional: a mascot.** A small character, rigged in Fanimate itself, would double as a demo asset and a test rig. This is a good dogfooding task but not a Phase 1 blocker.
 
@@ -474,20 +474,47 @@ Eight workstreams run in parallel. Each lists its main tasks, its dependencies a
 
 ## 4. Milestones
 
-The order is built around risk: prove the engine and renderer first, because everything else rests on them, and leave the long-tail compatibility work (importers) for when the core is stable. Durations are estimates and should be re-planned after Milestone 1.
+The order is built around risk: prove the engine and renderer first, because everything else rests on them, and leave the long-tail compatibility work (importers) for when the core is stable.
 
-| Milestone | Months | Theme | Main deliverables | Exit check |
+| Milestone | Target | Theme | Main deliverables | Exit check |
 |---|---|---|---|---|
-| **M0: Ground work** | 0 to 1 | Identity and setup | Name and trademark check; brand v1 (section 1); licence and repo; governance basics; CI skeleton; legal review scoped | Repo public with README, licence, brand assets |
-| **M1: Engine spike** | 1 to 3 | Prove the architecture | Core engine; wgpu renderer on three desktop platforms; `.fnm` v0 read and write; bare UI shell; benchmark scenes built | Benchmark vector scene renders at 60 fps on all three platforms; headless render works |
-| **M2: Draw** | 3 to 5 | Drawing and timeline basics | Vector brush and stabiliser; shape tools; layers; timeline and keyframes; undo; autosave journal; first themes | An artist can draw, animate by keyframes, save and recover after a forced crash |
-| **M3: Rig** | 5 to 7 | The reason people use Moho | Bones, FK and IK; Smart Bones; mesh deformation; Actions panel; rig health check; PSD import | A character from a PSD is rigged and animated; 40-bone rig at 60 fps |
-| **M4: Frame-by-frame and voice** | 7 to 9 | Traditional animation and dialogue | X-sheet; onion skin and light table; sub-layers; Rhubarb lip sync; SVG import; video export v1 | A hand-drawn cycle and a lip-synced line are exported to MP4 |
-| **M5: Bring your files** | 9 to 11 | Migration | Moho importer; Animate importer; web build; installers for all platforms; first public alpha; workspaces and command palette polish | Import corpus pass rate at or above 75%; alpha installs on a clean machine |
-| **M6: Harden** | 11 to 12 | Quality gate | Bug-fix freeze; public beta; performance tuning; crash-free measurement; legal review; documentation; 1.0 release candidate | Every Gate 1 criterion in section 5 passes |
+| **M0: Ground work** | Done 10 Oct 2026 | Identity and setup | Name and trademark check; brand v1 (section 1); licence and repo; governance basics; CI skeleton; legal review scoped | Repo public with README, licence, brand assets |
+| **M1: Engine spike** | Done on Windows 12 Oct 2026; macOS and Linux numbers by end of Oct 2026 | Prove the architecture | Core engine; wgpu renderer on three desktop platforms; `.fnm` v0 read and write; bare UI shell; benchmark scenes built | Benchmark vector scene renders at 60 fps on all three platforms; headless render works |
+| **M2: Draw** | Built 12 Oct 2026; exit check by mid-Nov 2026 | Drawing and timeline basics | Vector brush and stabiliser; shape tools; layers; timeline and keyframes; undo; autosave journal; first themes | An artist can draw, animate by keyframes, save and recover after a forced crash |
+| **M3: Rig** | Mid-Dec 2026 | The reason people use Moho | Bones, FK and IK; Smart Bones; mesh deformation; Actions panel; rig health check; PSD import | A character from a PSD is rigged and animated; 40-bone rig at 60 fps |
+| **M4: Frame-by-frame and voice** | End of Jan 2027 | Traditional animation and dialogue | X-sheet; onion skin and light table; sub-layers; Rhubarb lip sync; SVG import; video export v1 | A hand-drawn cycle and a lip-synced line are exported to MP4 |
+| **M5: Bring your files** | Public alpha by end of Mar 2027 | Migration | Moho importer; Animate importer; web build; installers for all platforms; opt-in crash reporting; first public alpha; workspaces and command palette polish | Import corpus pass rate at or above 75%; alpha installs on a clean machine |
+| **M6: Harden** | Apr to Jun 2027; 1.0 no earlier than end of Jun 2027 | Quality gate | Bug-fix freeze; public beta (at least 8 weeks); performance tuning; crash-free measurement; legal review; documentation; 1.0 release candidate | Every Gate 1 criterion in section 5 passes |
+
+### 4.1 Re-plan, 13 October 2026
+
+The first plan gave M0 to M2 months 0 to 5 and the whole phase about 12 months. M0 to M2 were built in four days (10 to 13 October 2026) with AI-assisted coding, and everything still open in them waits on people or hardware, not code. Writing code no longer sets the schedule. These do:
+
+| Constraint | Why it takes calendar time | Gates |
+|---|---|---|
+| Human review | Every change is reviewed by a person (section 6). The M2 changes alone were about 9,000 lines | Every milestone |
+| Artists and Moho animators | The exit checks for M2 to M4, the WS7 usability session and the Gate 1 usability test need real users. No advisers are recruited yet | M2, M3, M4, M6 |
+| Reference hardware | The 60 fps budget is measured on specific machines the team needs access to | M1, M3, M6 |
+| Import test corpus | 100 Moho and 50 Animate files, each with recorded consent. None are collected yet, and the importers cannot be measured without them | M5 |
+| Legal review | External, and the video codec answer is needed before MP4 export ships | M4, M5, M6 |
+| Code signing | Apple Developer account and a Windows code-signing certificate; identity checks take days to weeks | M5 |
+| Public beta | 99.5% crash-free sessions means fewer than 1 crash in 200 sessions, which takes thousands of opt-in sessions to show. Users, crash reports and stability releases need weeks, not days | M6 |
+
+**Build estimates.** Within each target, the build itself is estimated at 2 to 3 weeks for M3, 2 to 3 weeks for M4 and 4 to 6 weeks for M5; the rest is review, exit checks with users and fixing what they find. These assume the M0 to M2 pace holds, and that is one data point on the most familiar part of the work. Rigging and the importers are harder to get right than to write: IK and Smart Bones must feel right to Moho animators, and importers are tuned against real files. M4's target includes the end-of-year holidays.
+
+**Start now, because they are on the critical path:**
+
+1. Recruit the advisers (first 30 days, item 10). The M2 exit check needs an artist by early November, and M3 needs Moho animators for design reviews.
+2. Collect the import corpus. At least 100 Moho files with consent are needed by February 2027 for M5 to be measurable.
+3. Bring the codec part of the legal review forward (section 4 of the [review scope](../legal/review-scope.md)) so MP4 export in M4 is not blocked.
+4. Get the macOS and Linux reference machines, or access to them.
+5. Open the Apple Developer and Windows code-signing accounts by February 2027.
+
+Phase 1 is now planned at about 8 to 9 months (October 2026 to the end of June 2027) instead of 12. The saving comes from the build work; the user testing, corpus and beta time are unchanged, since they set the earliest 1.0 date. Re-plan again at the end of M3, with a second data point on build pace.
 
 **Rules for the schedule:**
 
+- **Building ahead is fine; closing early is not.** Work on a milestone can start while the previous one waits on an exit check, but a milestone closes only when its exit check passes, and fixing what an exit check finds comes before new features.
 - **No milestone closes with known data-loss bugs.** Data safety (P13, P14) is a standing requirement, not an M6 task.
 - **A public alpha at M5, not at M6.** The beta needs real users to produce the crash-free measurement.
 - **Moho and Animate importers wait until M5 on purpose.** They depend on a stable scene model. Starting them at M1 would mean rewriting them whenever the model changes. Start collecting the test corpus in M1, though, since that costs nothing.
@@ -552,7 +579,7 @@ These are in addition to the project-wide risks in the vision.
 | WebGPU limits make the browser build too weak | Medium | Low | Position as learning and review, as the vision says; ship with documented limits |
 | Early contributors and the community are too few | Medium | Medium | Public repo from M0; "good first issue" labels; publish architecture docs early |
 | Code quality problems, especially if AI-assisted coding is used | Medium | High | Human review on every change; benchmarks and tests in CI from M1 |
-| Name or trade-dress challenge | Low | High | Trademark search in Month 1; original icons and styling; legal review in M6 |
+| Name or trade-dress challenge | Low | High | Trademark search in M0 (done); original icons and styling; legal review in M6 |
 | Codec and font licence issues | Medium | Medium | Restrict Phase 1 export to the codecs listed in section 2.2; audit fonts and libraries |
 
 ---
@@ -574,4 +601,4 @@ A concrete starting list, in priority order.
 
 ---
 
-*This breakdown should be revisited at the end of M1. By then the first real benchmark numbers will show whether the 12-month estimate and the milestone order still hold.*
+*This breakdown was revisited after M1 and M2 (section 4.1). Revisit it again at the end of M3, when a second milestone's build pace and the first Smart Bones benchmark numbers show whether the targets and the milestone order still hold.*
