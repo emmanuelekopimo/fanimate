@@ -8,6 +8,7 @@
 //! [`eval::evaluate`], which turns a document at a given frame into a flat
 //! list of shapes ready to draw.
 
+pub mod actions;
 pub mod anim;
 pub mod bones;
 pub mod boolean;
@@ -20,6 +21,7 @@ pub mod samples;
 pub mod scene;
 pub mod transform;
 
+pub use actions::RigAction;
 pub use anim::{Channel, Frame, Interpolation, Key};
 pub use bones::{Bone, Skeleton};
 pub use boolean::BoolOp;

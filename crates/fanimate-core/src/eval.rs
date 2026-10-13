@@ -37,22 +37,31 @@ pub struct Evaluator {
     /// Per bone-layer nesting depth: skinning matrix for each bone
     /// (current pose times inverse rest pose).
     skins: Vec<Vec<Affine2>>,
+    /// Per bone-layer nesting depth: the frame each of its actions plays
+    /// at (Smart Bones), or NaN for actions that are not playing.
+    smart: Vec<Vec<f32>>,
     pose: Vec<Affine2>,
     rest: Vec<Affine2>,
+    angles: Vec<f32>,
+    /// The bone layer whose action is being edited: its Smart Bones are not
+    /// applied on top of the action's own keys.
+    editing: Option<crate::scene::LayerId>,
 }
 
 /// The bone layer a subtree is inside.
 #[derive(Clone, Copy)]
-struct Rig {
+struct Rig<'a> {
     /// Bone layer space to document space.
     world: Affine2,
-    /// Index into `Evaluator::skins`.
+    /// Index into `Evaluator::skins` and `Evaluator::smart`.
     depth: usize,
+    actions: &'a [crate::actions::RigAction],
 }
 
 impl Evaluator {
     pub fn evaluate_into<'a>(&mut self, doc: &'a Document, frame: f32, out: &mut Vec<DrawItem<'a>>) {
         out.clear();
+        self.editing = doc.action_edit.as_ref().map(|e| e.layer);
         self.visit(&doc.layers, frame, Affine2::IDENTITY, 1.0, None, out);
     }
 
@@ -65,7 +74,7 @@ impl Evaluator {
         frame: f32,
         world: Affine2,
         opacity: f32,
-        rig: Option<(Rig, Affine2)>,
+        rig: Option<(Rig<'a>, Affine2)>,
         out: &mut Vec<DrawItem<'a>>,
     ) {
         for layer in layers {
@@ -97,6 +106,9 @@ impl Evaluator {
                             _ => world,
                         };
                         let mut drawn = at_frame(shape, frame);
+                        if let Some((r, _)) = rig {
+                            morph(&mut drawn, r.actions, &self.smart[r.depth], layer.id, index);
+                        }
                         if let Some((skins, weights, rel)) = skinned {
                             deform(drawn.to_mut(), skins, weights, rel);
                         }
@@ -116,13 +128,47 @@ impl Evaluator {
                     let depth = rig.map_or(0, |(r, _)| r.depth + 1);
                     if self.skins.len() <= depth {
                         self.skins.resize_with(depth + 1, Vec::new);
+                        self.smart.resize_with(depth + 1, Vec::new);
                     }
-                    skeleton.pose(frame, &mut self.pose);
+                    skeleton.angles(frame, &mut self.angles);
+                    // Smart Bones: each driver, as the timeline poses it,
+                    // picks a frame of its action, which turns other bones
+                    let smart = &mut self.smart[depth];
+                    smart.clear();
+                    let on = self.editing != Some(layer.id);
+                    for act in &skeleton.actions {
+                        let f = act
+                            .driver
+                            .filter(|_| on)
+                            .and_then(|d| self.angles.get(d).copied())
+                            .and_then(|a| act.frame_for(a));
+                        smart.push(f.unwrap_or(f32::NAN));
+                    }
+                    for (act, &f) in skeleton.actions.iter().zip(smart.iter()) {
+                        if f.is_nan() {
+                            continue;
+                        }
+                        for b in &act.bones {
+                            if Some(b.bone) != act.driver
+                                && let Some(a) = self.angles.get_mut(b.bone)
+                            {
+                                *a += act.bone_offset(b.bone, f);
+                            }
+                        }
+                    }
+                    for (a, bone) in self.angles.iter_mut().zip(&skeleton.bones) {
+                        *a = bone.clamp(*a);
+                    }
+                    skeleton.pose_from(&self.angles, &mut self.pose);
                     skeleton.rest_pose(&mut self.rest);
                     let skins = &mut self.skins[depth];
                     skins.clear();
                     skins.extend(self.pose.iter().zip(&self.rest).map(|(p, r)| *p * r.inverse()));
-                    let inner = Rig { world, depth };
+                    let inner = Rig {
+                        world,
+                        depth,
+                        actions: &skeleton.actions,
+                    };
                     self.visit(
                         children,
                         frame,
@@ -134,6 +180,33 @@ impl Evaluator {
                 }
             }
         }
+    }
+}
+
+/// Add the point changes of the Smart Bone actions playing on `frames` to
+/// shape `index` of `layer`.
+fn morph(
+    shape: &mut Cow<'_, Shape>,
+    actions: &[crate::actions::RigAction],
+    frames: &[f32],
+    layer: crate::scene::LayerId,
+    index: usize,
+) {
+    for (act, &f) in actions.iter().zip(frames) {
+        // at rest an action changes nothing, so the shape is not copied
+        if f.is_nan() || f == 0.0 {
+            continue;
+        }
+        let Some(keys) = act.shape_keys(layer, index) else {
+            continue;
+        };
+        let (Some(from), Some(to)) = (
+            crate::actions::sample_keys(keys, 0.0),
+            crate::actions::sample_keys(keys, f),
+        ) else {
+            continue;
+        };
+        crate::actions::add_offset(&mut shape.to_mut().path, &from, &to);
     }
 }
 

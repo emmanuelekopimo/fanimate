@@ -14,6 +14,7 @@ use serde::{Deserialize, Serialize};
 use crate::action::{Action, Tool};
 use crate::history::History;
 
+mod actions;
 mod bones;
 mod booleans;
 mod construct;
@@ -266,6 +267,24 @@ impl Editor {
             BindToBone => {
                 self.bind_to_bone();
             }
+            NewAction => {
+                self.new_action(false);
+            }
+            NewSmartBoneAction => {
+                self.new_action(true);
+            }
+            EditAction(i) => {
+                self.edit_action(i);
+            }
+            FinishAction => {
+                self.finish_action();
+            }
+            InsertAction(i) => {
+                self.insert_action(i);
+            }
+            DeleteAction(i) => {
+                self.delete_action(i);
+            }
             BindSmoothly => {
                 self.bind_smoothly();
             }
@@ -341,6 +360,14 @@ impl Editor {
             Rename | LayerProperties => self.primary().is_some(),
             SetLabel(_) => has_sel,
             BindToBone | BindSmoothly | Unbind => self.can_bind(),
+            NewAction => self.actions_layer().is_some(),
+            NewSmartBoneAction => self
+                .actions_layer()
+                .is_some_and(|l| self.selected_bone().is_some_and(|b| b.layer == l)),
+            FinishAction => self.editing_action().is_some(),
+            EditAction(i) | InsertAction(i) | DeleteAction(i) => self
+                .actions_layer()
+                .is_some_and(|l| i < self.rig_actions(l).len()),
             Paste => self.clipboard.is_some(),
             FinishPath => self.is_drawing_path(),
             Union | Subtract | Intersect => self.can_combine(),

@@ -1,5 +1,6 @@
 //! The dockable panels and the status bar.
 
+mod actions;
 pub mod canvas;
 mod history;
 mod layers;
@@ -82,17 +83,7 @@ impl egui_dock::TabViewer for TabViewer<'_> {
             Tab::Properties => properties::show(ui, shell),
             Tab::Style => style::show(ui, shell),
             Tab::History => history::show(ui, shell),
-            Tab::Actions => {
-                ui.add_space(8.0);
-                ui.label(RichText::new("Actions and Smart Bones").strong());
-                ui.label(
-                    RichText::new(
-                        "Smart Bone actions, morphs and on-canvas controls arrive in milestone M3, \
-                         with the rigging system.",
-                    )
-                    .color(shell.palette.text_muted),
-                );
-            }
+            Tab::Actions => actions::show(ui, shell),
         }
     }
 

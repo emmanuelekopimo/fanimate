@@ -96,6 +96,7 @@ fn read(dir: &Path) -> Result<Document> {
         background: file.background,
         layers,
         next_layer_id: file.next_layer_id,
+        action_edit: None,
     })
 }
 
@@ -105,6 +106,8 @@ fn read(dir: &Path) -> Result<Document> {
 /// into place only once every file is written, so a crash or full disk
 /// mid-save never leaves a half-written project.
 pub fn save(doc: &Document, path: impl AsRef<Path>) -> Result<()> {
+    // an action being edited is put away first, so the timeline is saved
+    let doc = &*doc.mainline();
     let path = path.as_ref();
     let tmp = sibling(path, "saving");
     let old = sibling(path, "old");

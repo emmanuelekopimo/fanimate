@@ -41,6 +41,7 @@ pub enum Icon {
     Subtract,
     Intersect,
     History,
+    Action,
 }
 
 macro_rules! lucide {
@@ -102,6 +103,7 @@ impl Icon {
             Self::Subtract => lucide!("squares-subtract"),
             Self::Intersect => lucide!("squares-intersect"),
             Self::History => lucide!("history"),
+            Self::Action => lucide!("clapperboard"),
         }
     }
 }
@@ -238,6 +240,7 @@ mod tests {
             Icon::Subtract,
             Icon::Intersect,
             Icon::History,
+            Icon::Action,
         ]);
         icons
     }

@@ -30,6 +30,10 @@ pub struct Document {
     pub layers: Vec<Layer>,
     /// Next unused layer id.
     pub next_layer_id: u32,
+    /// The action being edited, if any (see [`crate::actions`]). Never in
+    /// a saved project: saving writes [`Document::mainline`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_edit: Option<crate::actions::ActionEdit>,
 }
 
 impl Document {
@@ -44,6 +48,7 @@ impl Document {
             background: Color::WHITE,
             layers: Vec::new(),
             next_layer_id: 1,
+            action_edit: None,
         }
     }
 

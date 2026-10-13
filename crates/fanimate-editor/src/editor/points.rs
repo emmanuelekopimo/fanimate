@@ -125,11 +125,21 @@ impl Editor {
             if !local.is_finite() {
                 continue;
             }
+            // in an action, every change is a key in it
+            let in_action = self.in_edited_action(shape.0);
             if let Some(s) = self.point_shape_mut(shape) {
                 // auto-key: a shape with point keys gets a key on this frame
                 let mut path = s.path_at(frame as f32).into_owned();
                 path.move_points(&points, local);
-                s.set_path_at(frame, path);
+                if in_action {
+                    if s.path_keys.is_empty() {
+                        // the action starts from the drawing as it is
+                        s.key_path(0, s.path.clone(), fanimate_core::Interpolation::Smooth);
+                    }
+                    s.key_path(frame, path, fanimate_core::Interpolation::Smooth);
+                } else {
+                    s.set_path_at(frame, path);
+                }
             }
         }
         self.dirty = true;

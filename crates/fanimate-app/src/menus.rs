@@ -195,6 +195,16 @@ pub fn animation(ui: &mut egui::Ui, shell: &mut Shell) {
     ui.separator();
     items(ui, shell, &[Action::AddKey, Action::DeleteKey]);
     interpolation_items(ui, shell);
+    ui.separator();
+    items(
+        ui,
+        shell,
+        &[
+            Action::NewAction,
+            Action::NewSmartBoneAction,
+            Action::FinishAction,
+        ],
+    );
 }
 
 /// The interpolation of the keys on the current frame, one item each.

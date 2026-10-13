@@ -52,6 +52,17 @@ pub enum Action {
     BindSmoothly,
     /// Stop shapes following bones.
     Unbind,
+    /// A new action on the bone layer, opened for editing.
+    NewAction,
+    /// A new Smart Bone action for the selected bone, opened for editing.
+    NewSmartBoneAction,
+    /// Edit action n of the bone layer.
+    EditAction(usize),
+    /// Stop editing the action and go back to the timeline.
+    FinishAction,
+    /// Copy action n into the timeline at the current frame.
+    InsertAction(usize),
+    DeleteAction(usize),
     // Animation
     PlayPause,
     NextFrame,
@@ -118,6 +129,12 @@ impl Action {
             BindToBone => "Bind to Selected Bone",
             BindSmoothly => "Bind Smoothly",
             Unbind => "Release from Bones",
+            NewAction => "New Action",
+            NewSmartBoneAction => "New Smart Bone Action",
+            EditAction(_) => "Edit Action",
+            FinishAction => "Finish Editing Action",
+            InsertAction(_) => "Insert Action Here",
+            DeleteAction(_) => "Delete Action",
             PlayPause => "Play/Pause",
             NextFrame => "Next Frame",
             PrevFrame => "Previous Frame",
@@ -179,6 +196,9 @@ impl Action {
             BindToBone,
             BindSmoothly,
             Unbind,
+            NewAction,
+            NewSmartBoneAction,
+            FinishAction,
             PlayPause,
             NextFrame,
             PrevFrame,

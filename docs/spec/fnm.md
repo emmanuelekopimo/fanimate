@@ -111,6 +111,7 @@ A skeleton. Shapes on vector layers anywhere inside `children` can bind to its b
 | Field | Type | Meaning |
 |---|---|---|
 | `skeleton.bones` | array of [bones](#bones) | Parents always come before their children |
+| `skeleton.actions` | array of [actions](#actions) | Optional (version 3) |
 | `children` | array of layers | Drawn first to last |
 
 ## Shapes
@@ -228,6 +229,39 @@ Every subpath starts with `M`. Drawing commands with no open subpath (before the
 
 Each bone's local space has its origin at the joint and +x pointing along the bone. Its transform at a frame is `parent_world × translate(origin) × rotate(angle)`.
 
+## Actions
+
+An action is a short animation kept on a bone layer, outside the main timeline.
+
+```json
+{
+  "name": "head",
+  "driver": 0,
+  "length": 24,
+  "bones": [{"bone": 0, "angle": {"base": 0.0, "keys": [{"frame": 0, "value": 0.0}, {"frame": 24, "value": 1.57}]}}],
+  "shapes": [{"layer": 4, "shape": 0, "path_keys": [{"frame": 0, "value": []}, {"frame": 24, "value": []}]}]
+}
+```
+
+(Paths shortened.)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | Display name |
+| `driver` | integer | Optional. Makes this a **Smart Bone action**: the index of the bone whose angle plays it. |
+| `length` | integer | Last frame of the action, which starts at frame 0. Positive. |
+| `bones` | array | Optional. Bone angle [channels](#channels) the action animates: `bone` (index) and `angle`. |
+| `shapes` | array | Optional. [Point keys](#point-keyframes) of shapes in vector layers inside the bone layer (not inside nested bone layers): `layer` (id), `shape` (index in it) and `path_keys`. |
+
+**Regular actions** (no `driver`) are clips the user copies into the timeline; they do not affect drawing by themselves.
+
+**Smart Bone actions** play by themselves:
+
+1. The driver's angle, as the timeline poses it, is looked up on the action's own keys for the driver, giving a frame of the action. Between two keys the frame is found by solving the channel for the angle; before the first or after the last key, the nearest end is used. An action whose driver has fewer than two keys does nothing.
+2. Every other bone in `bones` turns by its channel's value at that frame minus its value at frame 0.
+3. Every shape in `shapes` moves point by point by its keys' path at that frame minus their path at frame 0. Keys whose commands differ from the shape's path are ignored.
+4. Several Smart Bone actions add up. Smart Bone actions do not move their own drivers or drive each other.
+
 ## Channels
 
 Any animatable value is a channel:
@@ -302,6 +336,10 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | `skin` outside any bone layer | Warning | Remove the skin |
 | Bone `limits` not a finite range with min ≤ max | Error | Remove the limits |
 | Bone `strength` not a positive number | Warning | Use the default |
+| Action whose `driver` does not exist | Error | Remove the action |
+| Action `length` not positive | Error | Set to 1 |
+| Action keys for a bone that does not exist | Error | Remove those keys |
+| Action keys out of order, duplicated, negative or not finite | Error | As for channel keys |
 | Keyframe after the `end` frame | Warning | None; the key is kept |
 | Opacity outside 0 to 1 | Warning | None; clamped when drawn |
 
@@ -319,4 +357,4 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | 0 | Fanimate 0.0.1 | First version: layers, shapes, bones, channels | |
 | 1 | Development builds after Fanimate 0.0.5 (never released) | Shapes may have a stroke width profile (`widths`), written by the brush | Version 0 files need no conversion. A version 0 reader would ignore `widths` and draw brush strokes at one width, so the version was bumped. |
 | 2 | Fanimate 0.0.6 | Shapes may have point keyframes (`path_keys`) | Older files need no conversion. An older reader would ignore `path_keys` and draw animated drawings without their animation, so the version was bumped. |
-| 3 | Fanimate 0.0.7 | Layers may have a label colour (`label`); bones may have `limits`, `pinned` and `strength`; shapes may have a smooth binding (`skin`) | Older files need no conversion. An older reader would drop labels and draw smoothly bound artwork unbound, so the version was bumped. |
+| 3 | Fanimate 0.0.7 | Layers may have a label colour (`label`); bones may have `limits`, `pinned` and `strength`; shapes may have a smooth binding (`skin`); bone layers may have actions and Smart Bone actions | Older files need no conversion. An older reader would drop labels and draw smoothly bound artwork unbound, so the version was bumped. |

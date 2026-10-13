@@ -15,6 +15,7 @@ const ROW_HEIGHT: f32 = 22.0;
 const DEFAULT_FRAME_WIDTH: f32 = 12.0;
 
 pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
+    action_banner(ui, shell);
     transport(ui, shell);
     ui.add_space(2.0);
 
@@ -333,6 +334,34 @@ fn key_glyphs(layer: &fanimate_core::Layer) -> Vec<(Frame, Option<Interpolation>
 
 /// How close, in points, the pointer must be to a key to drag it.
 const KEY_GRAB_PX: f32 = 6.0;
+
+/// While an action is open, say so above the timeline: its keys are being
+/// edited, not the main timeline's.
+fn action_banner(ui: &mut egui::Ui, shell: &mut Shell) {
+    let Some((layer, index)) = shell.editor.editing_action() else {
+        return;
+    };
+    let Some(act) = shell.editor.rig_actions(layer).get(index) else {
+        return;
+    };
+    let p = shell.palette;
+    let text = format!(
+        "Editing action \"{}\" (frames 0 to {}). Changes go into the action, not the timeline.",
+        act.name, act.length
+    );
+    egui::Frame::NONE
+        .fill(p.accent.gamma_multiply(0.25))
+        .inner_margin(egui::Margin::symmetric(8, 3))
+        .corner_radius(3.0)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(text).size(12.0).color(p.text));
+                if ui.button("Finish editing").clicked() {
+                    shell.pending.push(Action::FinishAction);
+                }
+            });
+        });
+}
 
 fn transport(ui: &mut egui::Ui, shell: &mut Shell) {
     ui.horizontal(|ui| {

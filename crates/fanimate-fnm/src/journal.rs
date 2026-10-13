@@ -125,7 +125,7 @@ impl Journal {
         };
         if let Some(tx) = &self.tx {
             let _ = tx.send(Message::Record(Snapshot {
-                doc: Box::new(doc.clone()),
+                doc: Box::new(doc.mainline().into_owned()),
                 info,
                 history: history.filter(HistoryRecord::is_consistent),
             }));

@@ -86,6 +86,9 @@ impl Bone {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Skeleton {
     pub bones: Vec<Bone>,
+    /// Actions and Smart Bone actions (see [`crate::actions`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub actions: Vec<crate::actions::RigAction>,
 }
 
 impl Skeleton {
@@ -154,6 +157,7 @@ impl Skeleton {
         for bone in &mut self.bones {
             bone.parent = bone.parent.and_then(|p| map.get(p).copied().flatten());
         }
+        self.actions.retain_mut(|a| a.renumber(&map));
         map
     }
 

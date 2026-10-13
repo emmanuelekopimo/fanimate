@@ -334,6 +334,16 @@ impl Checker {
                     skeleton.bones[i].angle = angle;
                 }
                 let n = skeleton.bones.len();
+                let mut actions = std::mem::take(&mut skeleton.actions);
+                for (a, act) in actions.iter_mut().enumerate() {
+                    let aloc = format!("{loc} > action {a} \"{}\"", act.name);
+                    self.action(act, &aloc, n);
+                }
+                // an action whose driver is missing cannot play
+                if self.repair {
+                    actions.retain(|act| act.driver.is_none_or(|d| d < n));
+                }
+                skeleton.actions = actions;
                 for child in children {
                     self.layer(child, end, Some(n));
                 }
@@ -376,6 +386,49 @@ impl Checker {
                     }
                 }
             }
+        }
+    }
+
+    /// An action: its driver and bones exist, its keys are sound.
+    fn action(&mut self, act: &mut fanimate_core::RigAction, loc: &str, bones: usize) {
+        if act.driver.is_some_and(|d| d >= bones) {
+            self.issue(
+                Severity::Error,
+                loc,
+                "its Smart Bone does not exist; the action is removed".into(),
+                true,
+            );
+        }
+        if act.length < 1 {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!("length {} is not positive", act.length),
+                true,
+            );
+            if self.repair {
+                act.length = 1;
+            }
+        }
+        let missing = act.bones.iter().filter(|b| b.bone >= bones).count();
+        if missing > 0 {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!("animates {missing} bone(s) that do not exist; those keys are removed"),
+                true,
+            );
+            if self.repair {
+                act.bones.retain(|b| b.bone < bones);
+            }
+        }
+        for b in &mut act.bones {
+            let name = format!("bone {} angle", b.bone);
+            self.channel(&mut b.angle, loc, &name, act.length);
+        }
+        for s in &mut act.shapes {
+            let sloc = format!("{loc} > layer {} shape {}", s.layer.0, s.shape);
+            self.keys(&mut s.path_keys, |p| p.is_finite(), &sloc, act.length);
         }
     }
 
@@ -709,6 +762,31 @@ mod tests {
         assert_eq!(report.issues.len(), 4, "{report}");
         repair(&mut doc);
         assert!(validate(&doc).is_clean(), "{}", validate(&doc));
+    }
+
+    #[test]
+    fn broken_actions_are_repaired() {
+        let mut doc = rigged();
+        let LayerKind::Bone { skeleton, .. } = &mut doc.layers[0].kind else {
+            unreachable!()
+        };
+        let mut good = fanimate_core::RigAction::new("good", Some(0), 10);
+        good.bones.push(fanimate_core::actions::BoneKeys {
+            bone: 5,
+            angle: Channel::new(0.0),
+        });
+        skeleton.actions.push(good);
+        skeleton
+            .actions
+            .push(fanimate_core::RigAction::new("orphan", Some(9), 10));
+        assert_eq!(validate(&doc).unresolved_errors().count(), 2);
+        repair(&mut doc);
+        assert!(validate(&doc).is_clean(), "{}", validate(&doc));
+        let LayerKind::Bone { skeleton, .. } = &doc.layers[0].kind else {
+            unreachable!()
+        };
+        assert_eq!(skeleton.actions.len(), 1);
+        assert!(skeleton.actions[0].bones.is_empty());
     }
 
     #[test]
