@@ -95,7 +95,11 @@ impl Editor {
         self.place_imported(layer);
         self.set_status(
             StatusKind::Success,
-            format!("Imported {name} ({:.1} seconds)", info.seconds),
+            format!(
+                "Imported {} ({:.1} seconds)",
+                super::import::file_name(name),
+                info.seconds
+            ),
         );
         Ok(id)
     }

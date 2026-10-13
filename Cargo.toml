@@ -42,6 +42,7 @@ cpal = "0.18"
 hound = "3.5"
 lyon = "1.0"
 psd = "0.3"
+usvg = { version = "0.48", default-features = false }
 pollster = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -32,7 +32,7 @@ impl Editor {
         layer.transform.position.base = (self.doc.size() - size) / 2.0;
         let id = layer.id;
         self.place_imported(layer);
-        self.set_status(StatusKind::Success, format!("Imported {name}"));
+        self.set_status(StatusKind::Success, format!("Imported {}", file_name(name)));
         Ok(id)
     }
 
@@ -136,7 +136,7 @@ impl Editor {
         self.place_imported(root);
         self.set_status(
             StatusKind::Success,
-            format!("Imported {placed} layers from {name}"),
+            format!("Imported {placed} layers from {}", file_name(name)),
         );
         Ok(id)
     }
@@ -168,9 +168,14 @@ impl Editor {
     }
 }
 
+/// The file name without its folders, for messages.
+pub(super) fn file_name(name: &str) -> &str {
+    name.rsplit(['/', '\\']).next().unwrap_or(name)
+}
+
 /// The file name without folders or extension, for a layer name.
 pub(super) fn stem(name: &str) -> String {
-    let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
+    let file = file_name(name);
     let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
     if stem.is_empty() {
         "Picture".into()
@@ -305,5 +310,6 @@ mod tests {
         assert_eq!(stem("/a/b/hero.psd"), "hero");
         assert_eq!(stem("noext"), "noext");
         assert_eq!(stem(".png"), "Picture");
+        assert_eq!(file_name("C:\\art\\a.png"), "a.png");
     }
 }

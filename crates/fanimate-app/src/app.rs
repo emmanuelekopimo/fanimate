@@ -560,7 +560,8 @@ fn zoom_by(shell: &mut Shell, factor: f32) {
     shell.view.zoom = (shell.view.zoom * factor).clamp(0.02, 64.0);
 }
 
-/// Pick pictures, Photoshop files or sounds and import them as layers.
+/// Pick pictures, Photoshop or SVG files, or sounds, and import them as
+/// layers.
 fn import_dialog(shell: &mut Shell) {
     let Some(paths) = rfd::FileDialog::new()
         .set_title("Import pictures, a Photoshop file or sound")
@@ -581,6 +582,7 @@ fn import_dialog(shell: &mut Shell) {
                 .unwrap_or_default();
             match ext.as_str() {
                 "psd" => shell.editor.import_psd(&name, &bytes),
+                "svg" => shell.editor.import_svg(&name, &bytes),
                 "wav" => shell.editor.import_audio(&name, bytes),
                 _ => shell.editor.import_picture(&name, bytes),
             }

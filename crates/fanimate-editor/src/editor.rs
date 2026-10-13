@@ -23,6 +23,7 @@ mod import;
 mod points;
 mod shapes;
 mod sound;
+mod svg;
 pub use bones::BoneRef;
 pub use draw::DrawStyle;
 pub use points::PointRef;
