@@ -95,6 +95,7 @@ pub fn file(ui: &mut egui::Ui, shell: &mut Shell) {
     items(ui, shell, &[Action::Save, Action::SaveAs]);
     ui.separator();
     item(ui, shell, Action::Import);
+    items(ui, shell, &[Action::ExportVideo, Action::RenderQueue]);
     ui.separator();
     item(ui, shell, Action::Quit);
 }

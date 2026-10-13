@@ -378,26 +378,32 @@ mod tests {
         if !gpu_available() {
             return;
         }
-        let Some(ffmpeg) = ffmpeg::find() else {
+        if ffmpeg::find().is_none() {
             eprintln!("no ffmpeg; skipping");
             return;
-        };
+        }
         let dir = temp_dir("video");
-        for format in [Format::Mp4, Format::Mkv] {
+        let has = |bytes: &[u8], what: &[u8]| bytes.windows(what.len()).any(|w| w == what);
+        // the containers name their codecs; read them from the file, as the
+        // FFmpeg Fanimate ships cannot read video back
+        for (format, magic, video, audio) in [
+            (Format::Mp4, &b"ftyp"[..], &b"avc1"[..], &b"mp4a"[..]),
+            (
+                Format::Mkv,
+                &[0x1A, 0x45, 0xDF, 0xA3][..],
+                &b"V_MPEG4/ISO/AVC"[..],
+                &b"A_AAC"[..],
+            ),
+        ] {
             let out = dir.join(format!("tone.{}", format.extension()));
             let doc = sound::tests::with_sound(0);
             let mut s = small(format, 10);
             s.width = 63; // made even
             export(&doc, &s, &out, &mut |_, _| true).unwrap();
-            let probe = std::process::Command::new(&ffmpeg)
-                .args(["-hide_banner", "-i"])
-                .arg(&out)
-                .output()
-                .unwrap();
-            let info = String::from_utf8_lossy(&probe.stderr);
-            assert!(info.contains("h264"), "{info}");
-            assert!(info.contains("64x36"), "{info}");
-            assert!(info.contains("Audio: aac"), "{info}");
+            let bytes = std::fs::read(&out).unwrap();
+            assert!(has(&bytes[..16], magic), "{format:?} header");
+            assert!(has(&bytes, video), "{format:?} has H.264");
+            assert!(has(&bytes, audio), "{format:?} has AAC sound");
             assert!(!part(&out).exists());
         }
         std::fs::remove_dir_all(dir).unwrap();

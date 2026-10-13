@@ -181,6 +181,7 @@ const FANIMATE: &[(&str, Action)] = &[
     ("Ctrl+Shift+S", SaveAs),
     // Adobe Animate's Import to Stage
     ("Ctrl+R", Import),
+    ("Ctrl+Shift+R", ExportVideo),
     ("Ctrl+Q", Quit),
     // Edit
     ("Ctrl+Z", Undo),
@@ -257,6 +258,8 @@ const MOHO: &[(&str, Action)] = &[
     ("Ctrl+O", Open),
     ("Ctrl+S", Save),
     ("Ctrl+Shift+S", SaveAs),
+    // Moho's Export Animation
+    ("Ctrl+Shift+R", ExportVideo),
     ("Ctrl+Q", Quit),
     // Edit (Moho: redo is Ctrl+Shift+Z only; Ctrl+Y is its tracing image)
     ("Ctrl+Z", Undo),

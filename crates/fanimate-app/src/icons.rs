@@ -49,6 +49,7 @@ pub enum Icon {
     XSheet,
     SwitchLayer,
     AudioLayer,
+    Grip,
 }
 
 macro_rules! lucide {
@@ -118,6 +119,7 @@ impl Icon {
             Self::XSheet => lucide!("table-2"),
             Self::SwitchLayer => lucide!("toggle-left"),
             Self::AudioLayer => lucide!("audio-lines"),
+            Self::Grip => lucide!("grip-vertical"),
         }
     }
 }
@@ -262,6 +264,7 @@ mod tests {
             Icon::XSheet,
             Icon::SwitchLayer,
             Icon::AudioLayer,
+            Icon::Grip,
         ]);
         icons
     }

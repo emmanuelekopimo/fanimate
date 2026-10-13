@@ -19,6 +19,15 @@ pub enum Theme {
 impl Theme {
     pub const ALL: [Theme; 4] = [Self::Night, Self::Day, Self::StudioGrey, Self::HighContrast];
 
+    /// A stable name, for the command line.
+    pub fn id(self) -> &'static str {
+        self.token_key()
+    }
+
+    pub fn from_id(id: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|t| t.id() == id)
+    }
+
     fn token_key(self) -> &'static str {
         match self {
             Self::Night => "night",

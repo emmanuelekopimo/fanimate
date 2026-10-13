@@ -28,6 +28,8 @@ struct Settings {
     welcome_done: bool,
     draw: DrawStyle,
     onion: OnionSkin,
+    /// The format Export Video chose last.
+    export_format: fanimate_export::Format,
 }
 
 /// Onion skin settings, remembered between sessions.
@@ -64,6 +66,7 @@ impl Default for Settings {
             welcome_done: false,
             draw: DrawStyle::default(),
             onion: OnionSkin::default(),
+            export_format: Default::default(),
         }
     }
 }
@@ -126,6 +129,8 @@ pub struct UiState {
     pub open_tab: Option<Tab>,
     pub reset_layout: bool,
     pub window: titlebar::WindowState,
+    /// The Export Video window, while open.
+    pub export: Option<crate::export::ExportForm>,
 }
 
 /// Everything except the dock layout (kept apart so the dock and its tab
@@ -155,6 +160,9 @@ pub struct Shell {
     pub audio: crate::audio::Audio,
     /// A lip sync waiting on Rhubarb.
     pub lipsync: Option<crate::lipsync::Job>,
+    pub export_format: fanimate_export::Format,
+    /// Renders queued from here, for the status bar.
+    pub renders: crate::export::Renders,
     last_tick: Instant,
     allow_close: bool,
 }
@@ -235,6 +243,8 @@ impl FanimateApp {
                 light_table: false,
                 audio: Default::default(),
                 lipsync: None,
+                export_format: settings.export_format,
+                renders: Default::default(),
                 editor,
                 keymap: Keymap::new(KeymapKind::from_id(&settings.keymap).unwrap_or_default()),
                 theme: settings.theme,
@@ -341,6 +351,11 @@ impl eframe::App for FanimateApp {
             });
 
         dialogs::show(&ctx, shell);
+        crate::export::window(&ctx, shell);
+        {
+            let Shell { renders, editor, .. } = shell;
+            renders.poll(&ctx, &mut |kind, message| editor.set_status(kind, message));
+        }
         titlebar::resize_edges(&ctx, &shell.ui.window);
         native_cursors(&ctx);
 
@@ -401,6 +416,7 @@ impl eframe::App for FanimateApp {
                 welcome_done: !s.ui.show_welcome,
                 draw: s.editor.draw,
                 onion: s.onion,
+                export_format: s.export_format,
             },
         );
         eframe::set_value(storage, DOCK_KEY, &self.dock);
@@ -535,6 +551,14 @@ pub fn run_unchecked(ctx: &egui::Context, shell: &mut Shell, action: Action) {
             }
             Action::Import => import_dialog(shell),
             Action::LipSync => crate::lipsync::start(shell),
+            Action::ExportVideo => {
+                shell.ui.export = Some(crate::export::ExportForm::new(shell, shell.export_format));
+            }
+            Action::RenderQueue => {
+                if let Err(e) = crate::render_queue::open(shell.theme) {
+                    shell.editor.set_status(StatusKind::Error, e);
+                }
+            }
             Action::ToggleOnionSkin => shell.onion.on = !shell.onion.on,
             Action::ToggleLightTable => shell.light_table = !shell.light_table,
             Action::Quit => {

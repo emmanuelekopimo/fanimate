@@ -88,6 +88,7 @@ fn toolbar(ui: &mut egui::Ui, shell: &mut Shell) {
             menus::item(ui, shell, Action::NewGroupLayer);
             menus::item(ui, shell, Action::NewBoneLayer);
             menus::item(ui, shell, Action::NewFramesLayer);
+            menus::item(ui, shell, Action::NewSwitchLayer);
         });
         for (icon, action) in [
             (Icon::Duplicate, Action::Duplicate),

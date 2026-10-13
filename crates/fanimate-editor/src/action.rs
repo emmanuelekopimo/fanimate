@@ -10,8 +10,12 @@ pub enum Action {
     OpenSample(Sample),
     Save,
     SaveAs,
-    /// Import pictures or a Photoshop file.
+    /// Import pictures, Photoshop or SVG files, or sound.
     Import,
+    /// Render the animation to a video, GIF or PNG sequence.
+    ExportVideo,
+    /// Show the render queue window.
+    RenderQueue,
     Quit,
     // Edit
     Undo,
@@ -114,6 +118,8 @@ impl Action {
             Save => "Save",
             SaveAs => "Save As…",
             Import => "Import…",
+            ExportVideo => "Export Video…",
+            RenderQueue => "Render Queue",
             Quit => "Quit",
             Undo => "Undo",
             Redo => "Redo",
@@ -197,6 +203,8 @@ impl Action {
             Save,
             SaveAs,
             Import,
+            ExportVideo,
+            RenderQueue,
             Quit,
             Undo,
             Redo,

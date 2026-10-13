@@ -166,6 +166,21 @@ pub fn status_bar(ui: &mut egui::Ui, shell: &mut Shell) {
                         shell.view.zoom * ui.ctx().pixels_per_point() * 100.0
                     )));
                     ui.separator();
+                    if let Some((name, fraction)) = shell.renders.active.clone() {
+                        let bar = egui::ProgressBar::new(fraction)
+                            .desired_width(70.0)
+                            .desired_height(6.0)
+                            .fill(p.accent);
+                        let r = ui
+                            .add(bar)
+                            .on_hover_text(format!("Rendering {name}. Click to see the render queue."))
+                            .interact(egui::Sense::click());
+                        if r.clicked() {
+                            shell.pending.push(fanimate_editor::Action::RenderQueue);
+                        }
+                        ui.label(muted(format!("Rendering {:.0}%", fraction * 100.0)));
+                        ui.separator();
+                    }
                     let doc = &shell.editor.doc;
                     ui.label(muted(format!(
                         "Frame {} of {}",

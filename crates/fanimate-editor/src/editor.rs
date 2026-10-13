@@ -358,9 +358,9 @@ impl Editor {
                 use crate::action::Tool as T;
                 self.set_tool(if bone { T::AddBone } else { T::AddPoint });
             }
-            New | Open | OpenSample(_) | Save | SaveAs | Import | LipSync | Quit | ToggleOnionSkin
-            | ToggleLightTable | Preferences | CommandPalette | LayerProperties | ZoomIn | ZoomOut
-            | FitView | ActualSize => return Outcome::App(action),
+            New | Open | OpenSample(_) | Save | SaveAs | Import | ExportVideo | RenderQueue | LipSync
+            | Quit | ToggleOnionSkin | ToggleLightTable | Preferences | CommandPalette | LayerProperties
+            | ZoomIn | ZoomOut | FitView | ActualSize => return Outcome::App(action),
         }
         Outcome::Done
     }
