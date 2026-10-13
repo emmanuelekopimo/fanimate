@@ -224,6 +224,8 @@ const FANIMATE: &[(&str, Action)] = &[
     ("Shift+F6", DeleteKey),
     ("F7", NewDrawing),
     // View
+    ("Alt+O", ToggleOnionSkin),
+    ("Alt+L", ToggleLightTable),
     ("Ctrl+Equals", ZoomIn),
     ("Ctrl+Plus", ZoomIn),
     ("Ctrl+Minus", ZoomOut),

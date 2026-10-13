@@ -222,8 +222,8 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fanimate_core::LayerKind;
     use crate::{Action, Tool};
+    use fanimate_core::LayerKind;
     use fanimate_core::{AnimTransform, Shape};
 
     /// An editor whose selected layer holds a 100x100 rectangle at the

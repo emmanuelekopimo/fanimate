@@ -240,6 +240,11 @@ pub fn view(ui: &mut egui::Ui, shell: &mut Shell) {
         ],
     );
     ui.separator();
+    let onion = shell.onion.on;
+    item_checked(ui, shell, Action::ToggleOnionSkin, onion);
+    let light = shell.light_table;
+    item_checked(ui, shell, Action::ToggleLightTable, light);
+    ui.separator();
     ui.menu_button("Theme", |ui| {
         for theme in Theme::ALL {
             if ui.radio(shell.theme == theme, theme.label()).clicked() {

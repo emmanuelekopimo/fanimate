@@ -34,6 +34,9 @@ pub struct Tessellator {
     path: LyonPath,
     /// Where each picture's triangles start in the mesh, in order.
     pub runs: Vec<Run>,
+    /// Draw everything in this colour instead of its own, as onion skins
+    /// are shown. Pictures are tinted.
+    pub tint: Option<Color>,
     /// Maximum distance between a curve and its flattened version, in
     /// document units. Lower is smoother and slower.
     pub tolerance: f32,
@@ -46,6 +49,7 @@ impl Default for Tessellator {
             stroke: StrokeTessellator::new(),
             path: LyonPath::new(),
             runs: Vec::new(),
+            tint: None,
             tolerance: 0.25,
         }
     }
@@ -106,7 +110,7 @@ impl Tessellator {
         for item in items {
             if let Some(image) = &item.image {
                 self.switch(mesh, Some(image.media));
-                let c = color(Color::WHITE, item.opacity);
+                let c = color(self.tint.unwrap_or(Color::WHITE), item.opacity);
                 let base = mesh.vertices.len() as u32;
                 for (p, uv) in image.vertices.iter() {
                     let w = item.transform.transform_point2(*p);
@@ -137,7 +141,7 @@ impl Tessellator {
             self.build_path(&item.shape.path.cmds, item.transform, widths);
 
             if let Some(fill) = style.fill {
-                let c = color(fill, item.opacity);
+                let c = color(self.tint.unwrap_or(fill).with_alpha(fill.a), item.opacity);
                 let opts = FillOptions::tolerance(self.tolerance).with_fill_rule(FillRule::NonZero);
                 let result = self.fill.tessellate_path(
                     &self.path,
@@ -152,7 +156,10 @@ impl Tessellator {
                 }
             }
             if let Some(stroke) = style.stroke {
-                let c = color(stroke.color, item.opacity);
+                let c = color(
+                    self.tint.unwrap_or(stroke.color).with_alpha(stroke.color.a),
+                    item.opacity,
+                );
                 // approximate the transform's scale for the line width
                 let scale = item.transform.matrix2.determinant().abs().sqrt();
                 let mut opts = StrokeOptions::tolerance(self.tolerance).with_line_width(stroke.width * scale);

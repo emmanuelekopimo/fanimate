@@ -83,6 +83,10 @@ pub enum Action {
     /// How the keys on the current frame move on to the next key.
     SetInterpolation(fanimate_core::Interpolation),
     // View
+    /// Show the drawings before and after this frame faintly.
+    ToggleOnionSkin,
+    /// Fade every layer but the selected ones.
+    ToggleLightTable,
     ZoomIn,
     ZoomOut,
     FitView,
@@ -165,6 +169,8 @@ impl Action {
                 fanimate_core::Interpolation::Linear => "Interpolation: Linear",
                 fanimate_core::Interpolation::Step => "Interpolation: Step",
             },
+            ToggleOnionSkin => "Onion Skin",
+            ToggleLightTable => "Light Table",
             ZoomIn => "Zoom In",
             ZoomOut => "Zoom Out",
             FitView => "Fit Canvas",
@@ -227,6 +233,8 @@ impl Action {
             AddKey,
             DeleteKey,
             NewDrawing,
+            ToggleOnionSkin,
+            ToggleLightTable,
             ZoomIn,
             ZoomOut,
             FitView,

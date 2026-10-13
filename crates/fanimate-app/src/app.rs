@@ -27,6 +27,33 @@ struct Settings {
     theme: Theme,
     welcome_done: bool,
     draw: DrawStyle,
+    onion: OnionSkin,
+}
+
+/// Onion skin settings, remembered between sessions.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OnionSkin {
+    pub on: bool,
+    /// How many earlier and later frames or drawings show.
+    pub before: usize,
+    pub after: usize,
+    /// Only frames with drawings or keys, rather than every frame.
+    pub keys: bool,
+    /// Every layer, rather than the selected ones.
+    pub all_layers: bool,
+}
+
+impl Default for OnionSkin {
+    fn default() -> Self {
+        Self {
+            on: false,
+            before: 2,
+            after: 1,
+            keys: true,
+            all_layers: false,
+        }
+    }
 }
 
 impl Default for Settings {
@@ -36,6 +63,7 @@ impl Default for Settings {
             theme: Theme::default(),
             welcome_done: false,
             draw: DrawStyle::default(),
+            onion: OnionSkin::default(),
         }
     }
 }
@@ -120,6 +148,9 @@ pub struct Shell {
     pub icon: egui::TextureHandle,
     /// The crash recovery journal, and work recovered from a crash.
     pub recovery: Recovery,
+    pub onion: OnionSkin,
+    /// Fade every layer but the selected ones.
+    pub light_table: bool,
     last_tick: Instant,
     allow_close: bool,
 }
@@ -196,6 +227,8 @@ impl FanimateApp {
             shell: Shell {
                 icon,
                 recovery: Recovery::new(recovery_root),
+                onion: settings.onion,
+                light_table: false,
                 editor,
                 keymap: Keymap::new(KeymapKind::from_id(&settings.keymap).unwrap_or_default()),
                 theme: settings.theme,
@@ -248,7 +281,7 @@ pub fn default_layout() -> DockState<Tab> {
         vec![Tab::Properties, Tab::Style, Tab::Actions, Tab::History],
     );
     s.split_below(right, 0.42, vec![Tab::Layers]);
-    let [canvas, _timeline] = s.split_below(left, 0.70, vec![Tab::Timeline]);
+    let [canvas, _timeline] = s.split_below(left, 0.70, vec![Tab::Timeline, Tab::XSheet]);
     s.split_left(canvas, 0.09, vec![Tab::Tools]);
     dock
 }
@@ -357,6 +390,7 @@ impl eframe::App for FanimateApp {
                 theme: s.theme,
                 welcome_done: !s.ui.show_welcome,
                 draw: s.editor.draw,
+                onion: s.onion,
             },
         );
         eframe::set_value(storage, DOCK_KEY, &self.dock);
@@ -490,6 +524,8 @@ pub fn run_unchecked(ctx: &egui::Context, shell: &mut Shell, action: Action) {
                 save(shell, true);
             }
             Action::Import => import_dialog(shell),
+            Action::ToggleOnionSkin => shell.onion.on = !shell.onion.on,
+            Action::ToggleLightTable => shell.light_table = !shell.light_table,
             Action::Quit => {
                 shell.allow_close = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);

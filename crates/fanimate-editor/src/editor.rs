@@ -351,8 +351,9 @@ impl Editor {
                 use crate::action::Tool as T;
                 self.set_tool(if bone { T::AddBone } else { T::AddPoint });
             }
-            New | Open | OpenSample(_) | Save | SaveAs | Import | Quit | Preferences | CommandPalette
-            | LayerProperties | ZoomIn | ZoomOut | FitView | ActualSize => return Outcome::App(action),
+            New | Open | OpenSample(_) | Save | SaveAs | Import | Quit | ToggleOnionSkin
+            | ToggleLightTable | Preferences | CommandPalette | LayerProperties | ZoomIn | ZoomOut
+            | FitView | ActualSize => return Outcome::App(action),
         }
         Outcome::Done
     }
@@ -1000,6 +1001,46 @@ impl Editor {
         self.frame = self.doc.start as f32 + t.rem_euclid(n);
     }
 
+    /// The frames onion skins show: up to `before` frames before the current
+    /// one and `after` after it, nearest first. With `keys`, only frames
+    /// with a drawing or key on the selected layers (all layers when none is
+    /// selected), so the previous and next drawings show whatever their
+    /// timing.
+    pub fn onion_frames(&self, before: usize, after: usize, keys: bool) -> (Vec<Frame>, Vec<Frame>) {
+        let now = self.current_frame();
+        let (start, end) = (self.doc.start, self.doc.end);
+        if !keys {
+            let past = (1..=before as Frame)
+                .map(|k| now - k)
+                .filter(|f| *f >= start)
+                .collect();
+            let future = (1..=after as Frame)
+                .map(|k| now + k)
+                .filter(|f| *f <= end)
+                .collect();
+            return (past, future);
+        }
+        let ids: Vec<LayerId> = if self.selection.is_empty() {
+            self.rows(false).into_iter().map(|(id, _)| id).collect()
+        } else {
+            self.selection.clone()
+        };
+        let mut frames: Vec<Frame> = ids.iter().flat_map(|id| self.key_frames(*id)).collect();
+        frames.sort_unstable();
+        frames.dedup();
+        // the drawing or pose held now starts at the last key at or before
+        // the current frame; onion skins are the ones before and after it
+        let held = frames.partition_point(|f| *f <= now);
+        let past = frames[..held.saturating_sub(1)]
+            .iter()
+            .rev()
+            .take(before)
+            .copied()
+            .collect();
+        let future = frames[held..].iter().take(after).copied().collect();
+        (past, future)
+    }
+
     /// Frames with any keyframe on this layer (its transform and opacity,
     /// a bone layer's bones and a vector layer's point keys), sorted.
     pub fn key_frames(&self, id: LayerId) -> Vec<Frame> {
@@ -1450,6 +1491,22 @@ mod tests {
         assert_eq!(ed.current_frame(), 5);
         ed.run(Action::DeleteKey);
         assert_eq!(ed.key_frames(a), [12]);
+    }
+
+    #[test]
+    fn onion_frames_are_neighbours_or_neighbouring_keys() {
+        let (mut ed, [a, ..]) = three();
+        ed.select(a, SelectMode::Replace);
+        for f in [2, 6, 10, 14] {
+            ed.go_to(f);
+            ed.run(Action::AddKey);
+        }
+        ed.go_to(8);
+        assert_eq!(ed.onion_frames(2, 1, false), (vec![7, 6], vec![9]));
+        // held: the key on 6; skins: the keys before it and after now
+        assert_eq!(ed.onion_frames(2, 2, true), (vec![2], vec![10, 14]));
+        ed.go_to(0);
+        assert_eq!(ed.onion_frames(3, 1, false), (vec![], vec![1]));
     }
 
     #[test]

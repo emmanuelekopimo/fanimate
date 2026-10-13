@@ -8,6 +8,7 @@ mod properties;
 mod style;
 mod timeline;
 mod tools;
+mod xsheet;
 
 use std::time::{Duration, Instant};
 
@@ -30,10 +31,11 @@ pub enum Tab {
     Style,
     Actions,
     History,
+    XSheet,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 8] = [
+    pub const ALL: [Tab; 9] = [
         Self::Canvas,
         Self::Tools,
         Self::Layers,
@@ -42,6 +44,7 @@ impl Tab {
         Self::Style,
         Self::Actions,
         Self::History,
+        Self::XSheet,
     ];
 
     pub fn title(self) -> &'static str {
@@ -54,6 +57,7 @@ impl Tab {
             Self::Style => "Style",
             Self::Actions => "Actions",
             Self::History => "History",
+            Self::XSheet => "X-Sheet",
         }
     }
 }
@@ -83,6 +87,7 @@ impl egui_dock::TabViewer for TabViewer<'_> {
             Tab::Properties => properties::show(ui, shell),
             Tab::Style => style::show(ui, shell),
             Tab::History => history::show(ui, shell),
+            Tab::XSheet => xsheet::show(ui, shell),
             Tab::Actions => actions::show(ui, shell),
         }
     }
@@ -93,7 +98,7 @@ impl egui_dock::TabViewer for TabViewer<'_> {
 
     fn scroll_bars(&self, tab: &Tab) -> [bool; 2] {
         match tab {
-            Tab::Canvas | Tab::Timeline | Tab::Layers | Tab::History => [false, false],
+            Tab::Canvas | Tab::Timeline | Tab::Layers | Tab::History | Tab::XSheet => [false, false],
             _ => [false, true],
         }
     }

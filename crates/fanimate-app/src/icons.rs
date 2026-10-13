@@ -44,6 +44,9 @@ pub enum Icon {
     Action,
     ImageLayer,
     FramesLayer,
+    OnionSkin,
+    LightTable,
+    XSheet,
 }
 
 macro_rules! lucide {
@@ -108,6 +111,9 @@ impl Icon {
             Self::Action => lucide!("clapperboard"),
             Self::ImageLayer => lucide!("image"),
             Self::FramesLayer => lucide!("film"),
+            Self::OnionSkin => lucide!("layers-2"),
+            Self::LightTable => lucide!("lamp"),
+            Self::XSheet => lucide!("table-2"),
         }
     }
 }
@@ -247,6 +253,9 @@ mod tests {
             Icon::Action,
             Icon::ImageLayer,
             Icon::FramesLayer,
+            Icon::OnionSkin,
+            Icon::LightTable,
+            Icon::XSheet,
         ]);
         icons
     }

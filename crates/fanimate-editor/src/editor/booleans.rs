@@ -6,8 +6,8 @@
 
 use std::collections::BTreeSet;
 
-use fanimate_core::boolean::{self, BoolOp};
 use fanimate_core::Shape;
+use fanimate_core::boolean::{self, BoolOp};
 
 use super::{Editor, StatusKind};
 
@@ -134,8 +134,8 @@ impl Editor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use fanimate_core::LayerKind;
     use crate::{Action, Tool};
+    use fanimate_core::LayerKind;
     use fanimate_core::{LayerId, Vec2};
 
     /// Two overlapping 100x100 squares, all their points selected.

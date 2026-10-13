@@ -49,6 +49,7 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
     }
 
     // render the document into a texture and show it
+    let aids = canvas_overlays(shell);
     if let (Some(canvas), Some(rs)) = (&mut shell.canvas, &shell.render_state) {
         let size_px = [
             (rect.width() * ppp).round() as u32,
@@ -77,6 +78,7 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
             &view,
             pasteboard,
             preview.as_ref(),
+            &aids,
         );
         let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
         ui.painter().image(id, rect, uv, Color32::WHITE);
@@ -109,6 +111,41 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
         }
         menus::layer_context(ui, shell);
     });
+}
+
+/// Onion skins and the light table, from the view settings. Not while
+/// playing: they would only flicker.
+fn canvas_overlays(shell: &Shell) -> crate::canvas_gpu::Overlays {
+    let ed = &shell.editor;
+    let mut out = crate::canvas_gpu::Overlays::default();
+    if shell.light_table && !ed.selection.is_empty() {
+        out.light_table = Some(ed.selection.clone());
+    }
+    let o = shell.onion;
+    if !o.on || ed.playing {
+        return out;
+    }
+    let to_color = |c: egui::Color32| {
+        fanimate_core::Color::rgb(c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0)
+    };
+    let (past, future) = ed.onion_frames(o.before, o.after, o.keys);
+    let fade = |k: usize, n: usize| 0.45 * (1.0 - k as f32 / (n as f32 + 1.0));
+    // farthest first, so nearer skins are on top
+    for (k, f) in past.iter().enumerate().rev() {
+        out.onion
+            .push((*f as f32, to_color(shell.palette.onion_past), fade(k, past.len())));
+    }
+    for (k, f) in future.iter().enumerate().rev() {
+        out.onion.push((
+            *f as f32,
+            to_color(shell.palette.onion_future),
+            fade(k, future.len()),
+        ));
+    }
+    if !o.all_layers && !ed.selection.is_empty() {
+        out.onion_layers = Some(ed.selection.clone());
+    }
+    out
 }
 
 /// The pointer over the canvas says what the active tool will do.

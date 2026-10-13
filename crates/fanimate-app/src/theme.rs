@@ -56,6 +56,8 @@ pub struct Palette {
     pub bone: Color32,
     pub success: Color32,
     pub error: Color32,
+    pub onion_past: Color32,
+    pub onion_future: Color32,
     pub dark: bool,
 }
 
@@ -105,6 +107,8 @@ impl Palette {
             bone: c("bone"),
             success: c("success"),
             error: c("error"),
+            onion_past: c("onion-past"),
+            onion_future: c("onion-future"),
             dark: theme != Theme::Day,
         }
     }

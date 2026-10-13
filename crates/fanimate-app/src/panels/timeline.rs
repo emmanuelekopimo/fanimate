@@ -444,6 +444,41 @@ fn transport(ui: &mut egui::Ui, shell: &mut Shell) {
                 shell.pending.push(action);
             }
         }
+        ui.separator();
+        // onion skin: the toggle, and its settings on right-click
+        let onion = icons::button(ui, Icon::OnionSkin, 24.0, shell.onion.on, false).on_hover_text(format!(
+            "{}. Right-click for settings.",
+            tip(shell, Action::ToggleOnionSkin)
+        ));
+        if onion.clicked() {
+            shell.pending.push(Action::ToggleOnionSkin);
+        }
+        menus::context_menu(&onion, |ui| {
+            let o = &mut shell.onion;
+            ui.checkbox(&mut o.on, "Show onion skin");
+            ui.horizontal(|ui| {
+                ui.label("Before");
+                ui.add(egui::DragValue::new(&mut o.before).range(0..=10));
+                ui.label("After");
+                ui.add(egui::DragValue::new(&mut o.after).range(0..=10));
+            });
+            ui.checkbox(&mut o.keys, "Drawings and keys only")
+                .on_hover_text("Show the previous and next drawings, however long they are held");
+            ui.checkbox(&mut o.all_layers, "All layers")
+                .on_hover_text("Otherwise only the selected layers");
+        });
+        if icons::button(ui, Icon::LightTable, 24.0, shell.light_table, false)
+            .on_hover_text(tip(shell, Action::ToggleLightTable))
+            .clicked()
+        {
+            shell.pending.push(Action::ToggleLightTable);
+        }
+        if icons::button(ui, Icon::XSheet, 24.0, false, false)
+            .on_hover_text("X-Sheet: the same timing, frames down the page")
+            .clicked()
+        {
+            shell.ui.open_tab = Some(crate::panels::Tab::XSheet);
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(
                 RichText::new("Ctrl+scroll to zoom")
