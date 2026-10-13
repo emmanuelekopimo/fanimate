@@ -72,11 +72,12 @@ crates/
   fanimate-fnm      .fnm reader, atomic writer, validator and repair.
   fanimate-render   lyon tessellation + wgpu renderer; headless render to image.
   fanimate-editor   Editing model: Editor (selection, commands, undo), Action, Tool, keymaps, clipboard. No egui.
-  fanimate-app      The desktop app (eframe/egui + egui_dock): title bar, panels, canvas, dialogs.
-  fanimate-cli      Headless tool: sample, validate, render, bench.
+  fanimate-export   Video, GIF and PNG export (FFmpeg as a separate program), sound mixing, the render queue folder.
+  fanimate-app      The desktop app (eframe/egui + egui_dock): title bar, panels, canvas, dialogs, render queue window.
+  fanimate-cli      Headless tool: sample, validate, render, export, bench.
 ```
 
-Dependencies point downwards only: core ← fnm ← editor ← app; core ← render ← app/cli. **Keep `fanimate-core` free of UI, GPU and platform code** (it runs headless and in the browser), and **keep `fanimate-editor` free of egui** so every command is unit-tested without a window. If logic can live in `fanimate-editor`, it belongs there, with a test.
+Dependencies point downwards only: core ← fnm ← editor ← app; core ← render ← app/cli; fnm and render ← export ← app/cli. **Keep `fanimate-core` free of UI, GPU and platform code** (it runs headless and in the browser), and **keep `fanimate-editor` free of egui** so every command is unit-tested without a window. If logic can live in `fanimate-editor`, it belongs there, with a test.
 
 Key facts:
 
@@ -86,7 +87,7 @@ Key facts:
 
 - **Posing a bone always keys it.** A bone angle's `base` is the rest pose that bound artwork is measured from, so Manipulate Bones sets keys even on unkeyed bones (the one exception to the auto-key rule); Select Bone edits the rest pose.
 - **Actions are edited in place.** `Document::enter_action` swaps an action's keys into the bone layer and `action_edit` holds the timeline's keys aside; anything written to disk goes through `Document::mainline()` (`fanimate_fnm::save` and the journal already do). Smart Bones are not applied to the layer whose action is open.
-- **Pictures** live in `Document::media` by content-derived name (`MediaFile::name_for`) and on disk in the project's `media/` folder. Only names that pass `fanimate_fnm::is_media_name` are ever read or written.
+- **Pictures and sounds** live in `Document::media` by content-derived name (`MediaFile::name_for`) and on disk in the project's `media/` folder. Only names that pass `fanimate_fnm::is_media_name` are ever read or written.
 - Document space has **y pointing down**, angles in **radians**, positive is clockwise on screen. Frames are integers; frame 0 is the first; negative keyframes are invalid.
 - Layers are drawn first to last (last is on top). The Layers and Timeline panels list them **top of stack first** (`Editor::display_rows`).
 - A channel's `base` is its value when unkeyed and, for bones, the rest pose.
@@ -95,6 +96,8 @@ Key facts:
 - **Windows uses DirectX 12 by default**, never Vulkan, and OpenGL only when DirectX 12 has no hardware adapter: the Vulkan driver for some Intel GPUs (seen on HD Graphics 520) crashes the process on load, uncatchably, and the same machine's OpenGL driver crashes in about 1 of 40 runs at process exit even when merely loaded to list adapters. `fanimate_render::backends()` is the single source of this choice; `WGPU_BACKEND` overrides it.
 - egui turns Ctrl+C/X/V into `Event::Copy`/`Cut`/`Paste`, not key events; `app.rs` handles them directly. Shortcuts are ignored while a text field has focus, a modal or a menu is open.
 - **On Windows the app is a GUI program** (`windows_subsystem = "windows"`), so no console window opens. Print user-facing output with `crate::report`, which falls back to a message box when there is no console.
+- **Bundled programs never show a console.** FFmpeg (video export) and Rhubarb (lip sync) are separate programs shipped beside Fanimate, found there or on PATH, and started through `fanimate_export::ffmpeg::command` or with `CREATE_NO_WINDOW` on Windows. They run off the UI thread; the user sees progress, never a terminal.
+- **Exports run in the render queue process** (`fanimate --render-queue`, `render_queue.rs`), not the editor, so a render goes on after the editor closes. The editor only adds jobs (`fanimate_export::Queue::add`, a copy of `Document::mainline()`) and reads their status. Every export writes `.part` files and renames them when complete.
 - **A maximised borderless window must not cover the whole monitor.** winit sizes it to the work area, which is the whole monitor when the taskbar auto-hides; Windows then treats it as fullscreen (the taskbar stops appearing, Alt+Tab previews and OBS capture can go blank). `titlebar::track_window` replaces that maximise with a normal window one point short of the bottom edge. Keep it when changing window code.
 
 ## Commands
@@ -105,6 +108,9 @@ cargo run --release -p fanimate-app -- --bench      # 10 s playback benchmark
 cargo run --release -p fanimate-cli -- bench        # CPU benchmark
 cargo run --release -p fanimate-cli -- bench --gpu  # plus offscreen GPU render, no window
 cargo run --release -p fanimate-cli -- render scene.fnm -o out.png --frame 12
+cargo run --release -p fanimate-cli -- export scene.fnm -o out.mp4   # needs ffmpeg beside it or on PATH
+scripts/build-ffmpeg.sh ffmpeg-out                  # the FFmpeg that releases ship (needs nasm)
+scripts/fetch-rhubarb.sh linux rhubarb-out          # the Rhubarb that releases ship
 
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
@@ -127,7 +133,7 @@ pnpm release --dry-run                        # what a release would do
 - No placeholder code: no `let _ = SomeType::X;` to silence imports, no dead branches, no `todo!()` in shipped paths. Remove unused imports instead.
 - Errors: libraries return typed errors (`thiserror`); the app shows them in the status bar or a dialog. Never `unwrap` on user data or IO.
 - Tests: every editor command, file format change and bug fix gets a test. A bug fix's test must fail before the fix. GPU tests skip cleanly when no adapter exists.
-- Dependencies must be MIT/Apache-compatible (no GPL/LGPL in the app or engine). Check versions with `cargo search`; prefer versions at least two weeks old.
+- Dependencies must be MIT/Apache-compatible (no GPL/LGPL in the app or engine). The one exception is FFmpeg with x264 (GPL), which is never linked: it ships as a separate program, built by `scripts/build-ffmpeg.sh` from pinned sources that every release publishes (`docs/legal/video-export.md`). Keep it that way; do not add FFmpeg bindings. Check versions with `cargo search`; prefer versions at least two weeks old.
 - Keep `Cargo.lock` committed. Keep generated assets in sync with their sources.
 
 ## Documentation

@@ -33,6 +33,8 @@ Linux also needs the usual windowing libraries, for example on Ubuntu:
 sudo apt install libxkbcommon-dev libwayland-dev libgtk-3-dev libasound2-dev
 ```
 
+MP4 and MKV export and lip sync run separate programs that releases ship beside Fanimate. In a development build, put any `ffmpeg` (with libx264) and `rhubarb` on your PATH, or build the exact ones releases ship with `scripts/build-ffmpeg.sh ffmpeg-out` (needs nasm) and `scripts/fetch-rhubarb.sh <windows|linux|macos> rhubarb-out`. GIF and PNG export need neither.
+
 ### Repository layout
 
 | Path | What it is |
@@ -41,8 +43,9 @@ sudo apt install libxkbcommon-dev libwayland-dev libgtk-3-dev libasound2-dev
 | `crates/fanimate-fnm` | `.fnm` reader, writer and validator |
 | `crates/fanimate-render` | Tessellation (lyon) and GPU drawing (wgpu) |
 | `crates/fanimate-editor` | Editing model: selection, commands, undo, clipboard, keymaps. No UI toolkit code. |
-| `crates/fanimate-app` | The desktop app (`fanimate` binary): title bar, docked panels, canvas, dialogs |
-| `crates/fanimate-cli` | Headless tool (`fanimate-cli`): render, validate, benchmark |
+| `crates/fanimate-export` | Video, GIF and PNG export, sound mixing and the render queue folder |
+| `crates/fanimate-app` | The desktop app (`fanimate` binary): title bar, docked panels, canvas, dialogs, render queue window |
+| `crates/fanimate-cli` | Headless tool (`fanimate-cli`): render, export, validate, benchmark |
 | `docs/` | Product vision, roadmap, file format specification |
 | `brand/` | Logo, icons, design tokens; see [brand/README.md](brand/README.md) |
 
