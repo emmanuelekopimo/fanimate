@@ -3,7 +3,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use fanimate_core::{Color, Document, Frame, Layer};
+use std::sync::Arc;
+
+use fanimate_core::{Color, Document, Frame, Layer, LayerKind, MediaFile};
 use serde::{Deserialize, Serialize};
 
 use crate::validate::{self, Report};
@@ -17,7 +19,9 @@ pub const FORMAT_NAME: &str = "fnm";
 ///   brush. Version 0 files need no conversion.
 /// - 2: shapes may carry point keyframes (`path_keys`). Older files need
 ///   no conversion.
-pub const FORMAT_VERSION: u32 = 2;
+/// - 3: layers may carry a label colour (`label`). Older files need no
+///   conversion; their layers are shown with a colour picked by id.
+pub const FORMAT_VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize)]
 pub(crate) struct Manifest {
@@ -84,7 +88,7 @@ fn read(dir: &Path) -> Result<Document> {
         .map(|rel| read_json::<Layer>(&dir.join(rel)))
         .collect::<Result<Vec<_>>>()?;
 
-    Ok(Document {
+    let mut doc = Document {
         name: file.name,
         width: file.width,
         height: file.height,
@@ -94,7 +98,71 @@ fn read(dir: &Path) -> Result<Document> {
         background: file.background,
         layers,
         next_layer_id: file.next_layer_id,
+        action_edit: None,
+        media: Default::default(),
+    };
+    // pictures used by image layers; a missing one is reported by the
+    // validator and drawn as a grey placeholder, never a failed load
+    for name in media_names(&doc) {
+        if let Ok(bytes) = fs::read(dir.join(&name)) {
+            doc.media.insert(name, Arc::new(MediaFile { bytes }));
+        }
+    }
+    Ok(doc)
+}
+
+/// Whether `name` is a media file name Fanimate reads and writes: a plain
+/// file name inside the project's `media` folder, so a damaged project can
+/// never point outside its own folder.
+pub fn is_media_name(name: &str) -> bool {
+    name.strip_prefix("media/").is_some_and(|f| {
+        !f.is_empty()
+            && f.chars()
+                .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+            && !f.starts_with('.')
     })
+}
+
+/// The media files image layers use, with safe names.
+pub(crate) fn media_names(doc: &Document) -> Vec<String> {
+    let mut names = Vec::new();
+    doc.walk(|l| {
+        let media = match &l.kind {
+            LayerKind::Image(img) => Some(&img.media),
+            LayerKind::Audio(a) => Some(&a.media),
+            _ => None,
+        };
+        if let Some(m) = media
+            && is_media_name(m)
+            && !names.contains(m)
+        {
+            names.push(m.clone());
+        }
+    });
+    names
+}
+
+/// Write the media files `doc` uses into project folder `dir`, skipping
+/// any already there (their names follow their content).
+pub(crate) fn write_media(doc: &Document, dir: &Path) -> Result<()> {
+    let names = media_names(doc);
+    if names.is_empty() {
+        return Ok(());
+    }
+    let media_dir = dir.join("media");
+    fs::create_dir_all(&media_dir).map_err(|e| io_err(&media_dir, e))?;
+    for name in names {
+        let Some(file) = doc.media.get(&name) else {
+            continue;
+        };
+        let path = dir.join(&name);
+        if !path.is_file() {
+            let tmp = path.with_extension("tmp");
+            fs::write(&tmp, &file.bytes).map_err(|e| io_err(&tmp, e))?;
+            fs::rename(&tmp, &path).map_err(|e| io_err(&path, e))?;
+        }
+    }
+    Ok(())
 }
 
 /// Save a project folder.
@@ -103,6 +171,8 @@ fn read(dir: &Path) -> Result<Document> {
 /// into place only once every file is written, so a crash or full disk
 /// mid-save never leaves a half-written project.
 pub fn save(doc: &Document, path: impl AsRef<Path>) -> Result<()> {
+    // an action being edited is put away first, so the timeline is saved
+    let doc = &*doc.mainline();
     let path = path.as_ref();
     let tmp = sibling(path, "saving");
     let old = sibling(path, "old");
@@ -137,7 +207,7 @@ fn write_all(doc: &Document, dir: &Path) -> Result<()> {
     for layer in &doc.layers {
         write_json(&dir.join(layer_file(layer)), layer)?;
     }
-    Ok(())
+    write_media(doc, dir)
 }
 
 pub(crate) fn manifest() -> Manifest {
@@ -359,6 +429,96 @@ mod tests {
         assert!(report.is_clean(), "{report}");
         assert_eq!(loaded, doc);
         fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn labels_round_trip() {
+        let dir = temp_dir("labels");
+        let path = dir.join("p.fnm");
+        let mut doc = samples::hello();
+        doc.layers[0].label = Some(fanimate_core::Label::Pink);
+        save(&doc, &path).unwrap();
+        let (loaded, report) = load(&path).unwrap();
+        assert!(report.is_clean(), "{report}");
+        assert_eq!(loaded, doc);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn image_layers_and_their_pictures_round_trip() {
+        let dir = temp_dir("media");
+        let path = dir.join("p.fnm");
+        let mut doc = samples::hello();
+        let bytes = b"not really a png".to_vec();
+        let name = MediaFile::name_for(&bytes, "png");
+        doc.media.insert(name.clone(), Arc::new(MediaFile { bytes }));
+        let layer = doc.new_layer(
+            "pic",
+            LayerKind::Image(fanimate_core::Image::new(name.clone(), 20.0, 10.0)),
+        );
+        doc.layers.push(layer);
+        // a picture no layer uses is not saved
+        doc.media
+            .insert("media/unused.png".into(), Arc::new(MediaFile { bytes: vec![1] }));
+        save(&doc, &path).unwrap();
+        assert!(path.join(&name).is_file());
+        assert!(!path.join("media/unused.png").exists());
+        let (loaded, report) = load(&path).unwrap();
+        assert!(report.is_clean(), "{report}");
+        assert_eq!(loaded.layers, doc.layers);
+        assert_eq!(loaded.media.len(), 1);
+        assert_eq!(loaded.media[&name], doc.media[&name]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn switch_and_audio_layers_round_trip() {
+        use fanimate_core::{Interpolation, Key};
+        let dir = temp_dir("switch-audio");
+        let path = dir.join("p.fnm");
+        let mut doc = samples::hello();
+        let bytes = b"RIFF not really a wav".to_vec();
+        let name = MediaFile::name_for(&bytes, "wav");
+        doc.media.insert(name.clone(), Arc::new(MediaFile { bytes }));
+        let mut audio = fanimate_core::Audio::new(name.clone());
+        audio.start = -3;
+        audio.volume = 0.5;
+        let sound = doc.new_layer("line", LayerKind::Audio(audio));
+        let mouths = ["rest", "AI"].map(|n| doc.new_layer(n, LayerKind::vector(vec![])));
+        let switch = doc.new_layer(
+            "mouth",
+            LayerKind::Switch {
+                children: mouths.to_vec(),
+                switch: vec![Key {
+                    frame: 4,
+                    value: "AI".into(),
+                    interp: Interpolation::Step,
+                }],
+            },
+        );
+        doc.layers.extend([sound, switch]);
+        save(&doc, &path).unwrap();
+        assert!(path.join(&name).is_file());
+        let (loaded, report) = load(&path).unwrap();
+        assert!(report.is_clean(), "{report}");
+        assert_eq!(loaded.layers, doc.layers);
+        assert_eq!(loaded.media[&name], doc.media[&name]);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn media_names_stay_inside_the_project() {
+        assert!(is_media_name("media/0123abcd-10.png"));
+        for bad in [
+            "../x.png",
+            "media/../x.png",
+            "media/a/b.png",
+            "/etc/passwd",
+            "media/",
+            "media/.hidden",
+        ] {
+            assert!(!is_media_name(bad), "{bad}");
+        }
     }
 
     #[test]

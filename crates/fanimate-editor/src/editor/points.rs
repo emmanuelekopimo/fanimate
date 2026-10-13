@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use fanimate_core::{Affine2, LayerId, LayerKind, Vec2, evaluate};
+use fanimate_core::{Affine2, LayerId, Vec2, evaluate};
 
 use super::{Editor, SelectMode, StatusKind, plural};
 
@@ -24,7 +24,7 @@ impl Editor {
     /// The layer the point tools work on: the selected vector layer.
     pub fn point_layer(&self) -> Option<LayerId> {
         let id = self.primary()?;
-        matches!(self.doc.find(id)?.kind, LayerKind::Vector { .. }).then_some(id)
+        self.is_drawable(id).then_some(id)
     }
 
     /// Every point of the point layer's shapes, where it is drawn now (in
@@ -125,11 +125,21 @@ impl Editor {
             if !local.is_finite() {
                 continue;
             }
+            // in an action, every change is a key in it
+            let in_action = self.in_edited_action(shape.0);
             if let Some(s) = self.point_shape_mut(shape) {
                 // auto-key: a shape with point keys gets a key on this frame
                 let mut path = s.path_at(frame as f32).into_owned();
                 path.move_points(&points, local);
-                s.set_path_at(frame, path);
+                if in_action {
+                    if s.path_keys.is_empty() {
+                        // the action starts from the drawing as it is
+                        s.key_path(0, s.path.clone(), fanimate_core::Interpolation::Smooth);
+                    }
+                    s.key_path(frame, path, fanimate_core::Interpolation::Smooth);
+                } else {
+                    s.set_path_at(frame, path);
+                }
             }
         }
         self.dirty = true;
@@ -146,10 +156,7 @@ impl Editor {
         self.checkpoint(if n == 1 { "Delete point" } else { "Delete points" });
         // later shapes first, so removing one does not renumber the rest
         for (shape, points) in self.points_by_shape().into_iter().rev() {
-            let Some(layer) = self.doc.find_mut(shape.0) else {
-                continue;
-            };
-            let LayerKind::Vector { shapes } = &mut layer.kind else {
+            let Some(shapes) = self.layer_shapes_mut(shape.0) else {
                 continue;
             };
             if let Some(s) = shapes.get_mut(shape.1)
@@ -195,26 +202,20 @@ impl Editor {
         // hidden layers are not evaluated, so their points are not shown
         evaluate(&self.doc, self.current_frame() as f32)
             .into_iter()
-            .filter(|item| item.layer == layer)
+            .filter(|item| item.layer == layer && self.editable(item))
             .map(|item| ((layer, item.index), item.transform))
             .collect()
     }
 
     pub(super) fn point_shape(&self, (layer, index): (LayerId, usize)) -> Option<&fanimate_core::Shape> {
-        match &self.doc.find(layer)?.kind {
-            LayerKind::Vector { shapes } => shapes.get(index),
-            _ => None,
-        }
+        self.layer_shapes(layer)?.get(index)
     }
 
     pub(super) fn point_shape_mut(
         &mut self,
         (layer, index): (LayerId, usize),
     ) -> Option<&mut fanimate_core::Shape> {
-        match &mut self.doc.find_mut(layer)?.kind {
-            LayerKind::Vector { shapes } => shapes.get_mut(index),
-            _ => None,
-        }
+        self.layer_shapes_mut(layer)?.get_mut(index)
     }
 }
 
@@ -222,6 +223,7 @@ impl Editor {
 mod tests {
     use super::*;
     use crate::{Action, Tool};
+    use fanimate_core::LayerKind;
     use fanimate_core::{AnimTransform, Shape};
 
     /// An editor whose selected layer holds a 100x100 rectangle at the

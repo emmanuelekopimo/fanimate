@@ -157,11 +157,11 @@ impl Offscreen {
             view_formats: &[],
         });
         Self {
-            renderer: Renderer::new(&gpu.device, Self::FORMAT, 4),
+            renderer: Renderer::new(&gpu.device, &gpu.queue, Self::FORMAT, 4),
             target_view: target.create_view(&Default::default()),
             target,
             size,
-            evaluator: Evaluator::default(),
+            evaluator: Evaluator::for_render(),
             tess: Tessellator::new(),
             mesh: Mesh::new(),
         }
@@ -183,8 +183,7 @@ impl Offscreen {
         let view = View::fit(doc.size(), self.size, 0.0);
         let mut items = Vec::new();
         self.evaluator.evaluate_into(doc, frame, &mut items);
-        self.mesh.vertices.clear();
-        self.mesh.indices.clear();
+        self.tess.clear(&mut self.mesh);
         self.tess.tolerance = 0.25 / view.zoom;
         self.tess.canvas(doc, &mut self.mesh);
         self.tess.draw_items(&items, &mut self.mesh);
@@ -197,6 +196,8 @@ impl Offscreen {
             },
             &view,
             &self.mesh,
+            &self.tess.runs,
+            &doc.media,
             Color::TRANSPARENT,
         );
     }
@@ -314,6 +315,37 @@ mod tests {
         // the F's stem is white: stem centre is at x = 570 of 1280
         let stem = at(570 * w / 1280, h / 2 + 30);
         assert!(stem.iter().all(|&c| c >= 250), "{stem:?}");
+    }
+
+    #[test]
+    fn pictures_render_and_missing_ones_show_grey() {
+        let Some(gpu) = gpu_or_skip() else { return };
+        let mut doc = fanimate_core::Document::new("p", 100.0, 100.0, 24.0);
+        doc.background = fanimate_core::Color::WHITE;
+        let img = image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 0, 255, 255]));
+        let mut bytes = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut bytes), image::ImageFormat::Png)
+            .unwrap();
+        let name = fanimate_core::MediaFile::name_for(&bytes, "png");
+        doc.media.insert(
+            name.clone(),
+            std::sync::Arc::new(fanimate_core::MediaFile { bytes }),
+        );
+        let blue = doc.new_layer(
+            "blue",
+            fanimate_core::LayerKind::Image(fanimate_core::Image::new(name, 50.0, 100.0)),
+        );
+        let mut grey = doc.new_layer(
+            "gone",
+            fanimate_core::LayerKind::Image(fanimate_core::Image::new("media/gone.png", 50.0, 100.0)),
+        );
+        grey.transform.position.base = fanimate_core::Vec2::new(50.0, 0.0);
+        doc.layers.extend([blue, grey]);
+        let px = render_to_rgba(&gpu, &doc, 0.0, 100, 100).unwrap();
+        let at = |x: usize, y: usize| &px[(y * 100 + x) * 4..(y * 100 + x) * 4 + 3];
+        assert_eq!(at(20, 50), [0, 0, 255]);
+        let g = at(80, 50);
+        assert!(g[0] == g[1] && g[1] == g[2] && g[0] > 100 && g[0] < 250, "{g:?}");
     }
 
     /// Headless rendering is deterministic: a frame gives the same pixels

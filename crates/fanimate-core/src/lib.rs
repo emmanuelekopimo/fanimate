@@ -8,25 +8,32 @@
 //! [`eval::evaluate`], which turns a document at a given frame into a flat
 //! list of shapes ready to draw.
 
+pub mod actions;
 pub mod anim;
 pub mod bones;
 pub mod boolean;
 pub mod brush;
 pub mod color;
 pub mod eval;
+pub mod frames;
+pub mod health;
+pub mod media;
 pub mod path;
 pub mod points;
 pub mod samples;
 pub mod scene;
 pub mod transform;
 
+pub use actions::RigAction;
 pub use anim::{Channel, Frame, Interpolation, Key};
 pub use bones::{Bone, Skeleton};
 pub use boolean::BoolOp;
 pub use brush::{BrushOptions, BrushSample, Stabiliser};
 pub use color::Color;
-pub use eval::{DrawItem, evaluate};
+pub use eval::{DrawItem, ImageItem, evaluate};
+pub use frames::{Cel, Part};
 pub use glam::{Affine2, Vec2};
+pub use media::{Audio, Image, Media, MediaFile};
 pub use path::{Path, PathCmd, Shape, Stroke, Style};
-pub use scene::{Document, Layer, LayerId, LayerKind};
+pub use scene::{Document, Label, Layer, LayerId, LayerKind};
 pub use transform::{AnimTransform, Transform};

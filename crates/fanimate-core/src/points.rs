@@ -306,12 +306,14 @@ impl Shape {
         let remove = self.path.with_twins(points);
         let count = self.path.on_curve_count();
         let widths = self.widths.take().filter(|w| w.len() == count);
+        let skin = self.skin.take().filter(|w| w.len() == count);
         let (path, kept) = self.path.without(&remove);
         for key in &mut self.path_keys {
             key.value = key.value.without(&remove).0;
         }
         self.path = path;
         self.widths = widths.map(|w| kept.iter().map(|&k| w[k]).collect());
+        self.skin = skin.map(|w| kept.iter().map(|&k| w[k].clone()).collect());
         !self.path.cmds.is_empty()
     }
 
@@ -331,6 +333,15 @@ impl Shape {
             let before = w[number - 1];
             let after = w.get(number).copied().unwrap_or(before);
             w.insert(number, before + (after - before) * t.clamp(0.0, 1.0));
+        }
+        if let Some(skin) = self.skin.as_mut().filter(|s| s.len() == count) {
+            // the nearer neighbour's bones
+            let from = if t < 0.5 {
+                number - 1
+            } else {
+                number.min(skin.len() - 1)
+            };
+            skin.insert(number, skin[from].clone());
         }
         Some(number)
     }
@@ -390,6 +401,9 @@ impl Shape {
         let number = if at_start { point } else { point + 1 };
         if let Some(w) = self.widths.as_mut().filter(|w| w.len() == count) {
             w.insert(number, w[point]);
+        }
+        if let Some(skin) = self.skin.as_mut().filter(|s| s.len() == count) {
+            skin.insert(number, skin[point].clone());
         }
         Some(number)
     }
@@ -668,6 +682,18 @@ mod tests {
         assert!(matches!(r.path.cmds[cmd], PathCmd::Close));
         assert_eq!(r.insert_point(cmd, t), Some(4));
         assert_eq!(r.path.on_curve_points()[4], Vec2::new(0.0, 5.0));
+    }
+
+    #[test]
+    fn point_edits_keep_the_skin_in_step() {
+        let mut s = line3();
+        s.skin = Some(vec![vec![(0, 1.0)], vec![(1, 1.0)], vec![(2, 1.0)]]);
+        s.insert_point(2, 0.8);
+        assert_eq!(s.skin.as_ref().unwrap()[2], vec![(2, 1.0)]);
+        s.extend_from(0, Vec2::X);
+        assert_eq!(s.skin.as_ref().unwrap()[0], vec![(0, 1.0)]);
+        s.remove_points(&set(&[1]));
+        assert_eq!(s.skin.as_ref().unwrap().len(), s.path.on_curve_count());
     }
 
     #[test]

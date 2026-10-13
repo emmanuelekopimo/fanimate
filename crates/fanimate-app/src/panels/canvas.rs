@@ -42,12 +42,14 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
     click_tools(&response, shell, &to_doc);
     point_tools(&ctx, &response, shell, &to_doc);
     add_point_tool(&response, shell, &to_doc);
+    bone_tools(&ctx, &response, shell, &to_doc);
     pen_tool(&ctx, &response, shell, &to_doc);
     if response.hovered() || response.dragged() {
         ctx.set_cursor_icon(tool_cursor(&ctx, &response, shell.editor.tool));
     }
 
     // render the document into a texture and show it
+    let aids = canvas_overlays(shell);
     if let (Some(canvas), Some(rs)) = (&mut shell.canvas, &shell.render_state) {
         let size_px = [
             (rect.width() * ppp).round() as u32,
@@ -76,6 +78,7 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
             &view,
             pasteboard,
             preview.as_ref(),
+            &aids,
         );
         let uv = Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0));
         ui.painter().image(id, rect, uv, Color32::WHITE);
@@ -93,6 +96,7 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
     overlays(ui, shell, rect, &to_screen);
     point_overlay(ui, shell, rect, &to_screen);
     pen_overlay(ui, shell, rect, &to_screen);
+    weight_overlay(ui, shell, rect, &to_screen);
     brush_cursor(ui, &response, shell);
 
     menus::context_menu(&response, |ui| {
@@ -109,6 +113,41 @@ pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
     });
 }
 
+/// Onion skins and the light table, from the view settings. Not while
+/// playing: they would only flicker.
+fn canvas_overlays(shell: &Shell) -> crate::canvas_gpu::Overlays {
+    let ed = &shell.editor;
+    let mut out = crate::canvas_gpu::Overlays::default();
+    if shell.light_table && !ed.selection.is_empty() {
+        out.light_table = Some(ed.selection.clone());
+    }
+    let o = shell.onion;
+    if !o.on || ed.playing {
+        return out;
+    }
+    let to_color = |c: egui::Color32| {
+        fanimate_core::Color::rgb(c.r() as f32 / 255.0, c.g() as f32 / 255.0, c.b() as f32 / 255.0)
+    };
+    let (past, future) = ed.onion_frames(o.before, o.after, o.keys);
+    let fade = |k: usize, n: usize| 0.45 * (1.0 - k as f32 / (n as f32 + 1.0));
+    // farthest first, so nearer skins are on top
+    for (k, f) in past.iter().enumerate().rev() {
+        out.onion
+            .push((*f as f32, to_color(shell.palette.onion_past), fade(k, past.len())));
+    }
+    for (k, f) in future.iter().enumerate().rev() {
+        out.onion.push((
+            *f as f32,
+            to_color(shell.palette.onion_future),
+            fade(k, future.len()),
+        ));
+    }
+    if !o.all_layers && !ed.selection.is_empty() {
+        out.onion_layers = Some(ed.selection.clone());
+    }
+    out
+}
+
 /// The pointer over the canvas says what the active tool will do.
 fn tool_cursor(ctx: &egui::Context, response: &egui::Response, tool: Tool) -> egui::CursorIcon {
     use egui::CursorIcon;
@@ -118,19 +157,19 @@ fn tool_cursor(ctx: &egui::Context, response: &egui::Response, tool: Tool) -> eg
     match tool {
         // Windows has no hand cursors, so panning shows the move arrows
         Tool::Pan | Tool::TransformLayer | Tool::TranslatePoints => CursorIcon::Move,
-        Tool::SelectPoints => CursorIcon::Default,
+        Tool::SelectPoints | Tool::SelectBone | Tool::ManipulateBones => CursorIcon::Default,
         Tool::Zoom if ctx.input(|i| i.modifiers.alt) => CursorIcon::ZoomOut,
         Tool::Zoom => CursorIcon::ZoomIn,
         Tool::Freehand
         | Tool::AddPoint
         | Tool::Pen
+        | Tool::AddBone
+        | Tool::PaintWeights
         | Tool::Eraser
         | Tool::Rectangle
         | Tool::Ellipse
         | Tool::PaintBucket
         | Tool::Eyedropper => CursorIcon::Crosshair,
-        // tools that arrive in later milestones do nothing here yet
-        _ => CursorIcon::NotAllowed,
     }
 }
 
@@ -360,6 +399,7 @@ fn brush_cursor(ui: &egui::Ui, response: &egui::Response, shell: &Shell) {
     let size = match shell.editor.tool {
         Tool::Freehand => shell.editor.draw.width,
         Tool::Eraser => shell.editor.draw.eraser,
+        Tool::PaintWeights => shell.editor.draw.weight_brush,
         _ => return,
     };
     let Some(pos) = response.hover_pos().or(response.interact_pointer_pos()) else {
@@ -559,6 +599,105 @@ fn add_point_tool(response: &egui::Response, shell: &mut Shell, to_doc: &impl Fn
     }
 }
 
+/// How close, in screen pixels, a click must be to a bone to pick it.
+const BONE_SLOP_PX: f32 = 6.0;
+
+/// Add Bone, Select Bone, Manipulate Bones and Paint Weights.
+fn bone_tools(
+    ctx: &egui::Context,
+    response: &egui::Response,
+    shell: &mut Shell,
+    to_doc: &impl Fn(Vec2, f32, Pos2) -> Vec2,
+) {
+    let tool = shell.editor.tool;
+    if !matches!(
+        tool,
+        Tool::AddBone | Tool::SelectBone | Tool::ManipulateBones | Tool::PaintWeights
+    ) {
+        return;
+    }
+    let (center, zoom) = (shell.view.center, shell.view.zoom);
+    let doc = |p: Pos2| to_doc(center, zoom, p);
+    let slop = BONE_SLOP_PX / zoom;
+    let (mods, press_origin) = ctx.input(|i| (i.modifiers, i.pointer.press_origin()));
+
+    // a click picks a bone (or clears the choice) with any bone tool but Add
+    if response.clicked_by(egui::PointerButton::Primary)
+        && tool != Tool::AddBone
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        if tool == Tool::PaintWeights {
+            if shell.editor.begin_paint_weights() {
+                shell
+                    .editor
+                    .paint_weights(doc(pos), shell.editor.draw.weight_brush / 2.0, 0.2, mods.alt);
+                shell.editor.end_paint_weights();
+            }
+        } else {
+            let bone = shell.editor.bone_at(doc(pos), slop);
+            shell.editor.select_bone(bone);
+        }
+        return;
+    }
+    if response.drag_started_by(egui::PointerButton::Primary)
+        && let Some(start) = press_origin.or(response.interact_pointer_pos())
+    {
+        let at = doc(start);
+        match tool {
+            Tool::AddBone => {
+                shell.editor.begin_add_bone(at);
+            }
+            Tool::SelectBone => {
+                if !shell.editor.begin_bone_edit(at, slop) {
+                    let bone = shell.editor.bone_at(at, slop);
+                    shell.editor.select_bone(bone);
+                    shell.editor.begin_bone_edit(at, slop);
+                }
+            }
+            Tool::ManipulateBones => {
+                shell.editor.begin_pose(at, slop, mods.alt);
+            }
+            _ => {
+                shell.editor.begin_paint_weights();
+            }
+        }
+    }
+    if response.dragged_by(egui::PointerButton::Primary)
+        && let Some(pos) = response.interact_pointer_pos()
+    {
+        if tool == Tool::PaintWeights {
+            // per frame, so the brush builds up gently while held
+            let amount = (ctx.input(|i| i.stable_dt) * 1.5).min(0.2);
+            shell
+                .editor
+                .paint_weights(doc(pos), shell.editor.draw.weight_brush / 2.0, amount, mods.alt);
+            ctx.request_repaint();
+        } else if shell.editor.is_dragging_bone() {
+            shell.editor.drag_bone(doc(pos));
+        }
+    }
+    if response.drag_stopped() {
+        shell.editor.end_bone_drag();
+        shell.editor.end_paint_weights();
+    }
+}
+
+/// With Paint Weights, each point of the bound layer as a dot whose
+/// strength shows how much it follows the selected bone.
+fn weight_overlay(ui: &egui::Ui, shell: &Shell, rect: Rect, to_screen: &impl Fn(Vec2, f32, Vec2) -> Pos2) {
+    if shell.editor.tool != Tool::PaintWeights {
+        return;
+    }
+    let painter = ui.painter_at(rect);
+    let (c, z, p) = (shell.view.center, shell.view.zoom, shell.palette);
+    for (pos, w) in shell.editor.bone_weights() {
+        let s = to_screen(c, z, pos);
+        painter.circle_filled(s, 5.0, p.panel);
+        painter.circle_filled(s, 4.0, p.bone.gamma_multiply(w.clamp(0.0, 1.0)));
+        painter.circle_stroke(s, 5.0, Stroke::new(1.0, p.bone));
+    }
+}
+
 /// The Pen: press to add a point, drag before releasing to make it smooth.
 fn pen_tool(
     ctx: &egui::Context,
@@ -675,6 +814,46 @@ fn click_tools(response: &egui::Response, shell: &mut Shell, to_doc: &impl Fn(Ve
     }
 }
 
+/// A bone layer's bones as tapered shapes from joint to tip, the selected
+/// one in the interaction colour, pinned ones with a square joint.
+fn bone_overlay(
+    painter: &egui::Painter,
+    shell: &Shell,
+    rig: LayerId,
+    to_screen: &impl Fn(Vec2, f32, Vec2) -> Pos2,
+) {
+    let ed = &shell.editor;
+    let (c, z, p) = (shell.view.center, shell.view.zoom, shell.palette);
+    let selected = ed.selected_bone().filter(|b| b.layer == rig).map(|b| b.bone);
+    for (i, joint, tip) in ed.bone_positions(rig) {
+        let (sa, sb) = (to_screen(c, z, joint), to_screen(c, z, tip));
+        let color = if selected == Some(i) { p.accent } else { p.bone };
+        let d = sb - sa;
+        let len = d.length();
+        if len > 1.0 {
+            // a kite: wide near the joint, to a point at the tip
+            let n = egui::vec2(-d.y, d.x) / len * (len * 0.12).clamp(3.0, 9.0);
+            let m = sa + d * 0.15;
+            painter.add(egui::Shape::convex_polygon(
+                vec![sa, m + n, sb, m - n],
+                color.gamma_multiply(0.55),
+                Stroke::new(1.5, color),
+            ));
+        }
+        let pinned = ed
+            .bone(fanimate_editor::BoneRef { layer: rig, bone: i })
+            .is_some_and(|b| b.pinned);
+        if pinned {
+            let r = Rect::from_center_size(sa, egui::vec2(9.0, 9.0));
+            painter.rect_filled(r, 1.0, color);
+            painter.rect_stroke(r, 1.0, Stroke::new(1.0, p.bg), egui::StrokeKind::Outside);
+        } else {
+            painter.circle_filled(sa, 4.5, color);
+            painter.circle_stroke(sa, 4.5, Stroke::new(1.0, p.bg));
+        }
+    }
+}
+
 fn bounds(points: impl Iterator<Item = Vec2>) -> Option<(Vec2, Vec2)> {
     points.fold(None, |acc, q| match acc {
         None => Some((q, q)),
@@ -693,6 +872,7 @@ fn overlays(ui: &egui::Ui, shell: &Shell, rect: Rect, to_screen: &impl Fn(Vec2, 
     let p = shell.palette;
 
     let items = evaluate(&ed.doc, ed.frame);
+    let mut drawn = Vec::new();
     for sel in &ed.selection {
         let pts = items
             .iter()
@@ -708,21 +888,18 @@ fn overlays(ui: &egui::Ui, shell: &Shell, rect: Rect, to_screen: &impl Fn(Vec2, 
             painter.rect_stroke(r, 2.0, Stroke::new(1.5, p.accent), egui::StrokeKind::Outside);
         }
 
-        // bones of a selected bone layer
-        let Some(layer) = ed.doc.find(*sel) else { continue };
-        let LayerKind::Bone { skeleton, .. } = &layer.kind else {
-            continue;
+        // bones of a selected bone layer, or with a bone tool, of the bone
+        // layer around the selection
+        let rig = match ed.doc.find(*sel).map(|l| &l.kind) {
+            Some(LayerKind::Bone { .. }) => Some(*sel),
+            _ if ed.tool.group() == fanimate_editor::ToolGroup::Bone => ed.enclosing_rig(*sel),
+            _ => None,
         };
-        let world = ed.world(*sel);
-        let mut poses = Vec::new();
-        skeleton.pose(ed.frame, &mut poses);
-        for (i, bone) in skeleton.bones.iter().enumerate() {
-            let a = world.transform_point2(poses[i].transform_point2(Vec2::ZERO));
-            let b = world.transform_point2(poses[i].transform_point2(Vec2::new(bone.length, 0.0)));
-            let (sa, sb) = (to_screen(c, z, a), to_screen(c, z, b));
-            painter.line_segment([sa, sb], Stroke::new(3.0, p.bone));
-            painter.circle_filled(sa, 4.5, p.bone);
-            painter.circle_stroke(sa, 4.5, Stroke::new(1.0, p.bg));
+        if let Some(rig) = rig
+            && !drawn.contains(&rig)
+        {
+            drawn.push(rig);
+            bone_overlay(&painter, shell, rig, to_screen);
         }
     }
 }

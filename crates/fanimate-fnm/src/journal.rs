@@ -125,7 +125,7 @@ impl Journal {
         };
         if let Some(tx) = &self.tx {
             let _ = tx.send(Message::Record(Snapshot {
-                doc: Box::new(doc.clone()),
+                doc: Box::new(doc.mainline().into_owned()),
                 info,
                 history: history.filter(HistoryRecord::is_consistent),
             }));
@@ -242,6 +242,7 @@ impl Writer {
         for layer in doc.layers.iter().filter(|l| !unchanged(l.id)) {
             write_json_atomic(&self.project.join(layer_file(layer)), layer)?;
         }
+        crate::io::write_media(doc, &self.project)?;
         write_json_atomic(&self.project.join("document.json"), &document_file(doc))?;
         if let Some(previous) = previous {
             for gone in previous
@@ -276,7 +277,13 @@ impl Recoverable {
     /// repairs is left out rather than risk undoing into a broken state;
     /// the project itself is unaffected.
     pub fn load_history(&self) -> Option<HistoryRecord> {
-        let record = history::read(&self.dir.join(HISTORY)).ok()?;
+        let mut record = history::read(&self.dir.join(HISTORY)).ok()?;
+        // pictures are not in the history's own files; every picture the
+        // session used is kept in the copy's media folder
+        let media = read_media_dir(&self.dir.join(PROJECT));
+        for state in &mut record.states {
+            std::sync::Arc::make_mut(&mut state.meta).media = media.clone();
+        }
         let sound = record.is_consistent()
             && record.states.iter().all(|s| {
                 crate::validate(&s.document())
@@ -292,6 +299,23 @@ impl Recoverable {
     pub fn discard(&self) {
         let _ = fs::remove_dir_all(&self.dir);
     }
+}
+
+/// Every picture in a project folder's `media` folder.
+fn read_media_dir(project: &Path) -> fanimate_core::Media {
+    let mut media = fanimate_core::Media::new();
+    let Ok(entries) = fs::read_dir(project.join("media")) else {
+        return media;
+    };
+    for entry in entries.flatten() {
+        let name = format!("media/{}", entry.file_name().to_string_lossy());
+        if crate::is_media_name(&name)
+            && let Ok(bytes) = fs::read(entry.path())
+        {
+            media.insert(name, std::sync::Arc::new(fanimate_core::MediaFile { bytes }));
+        }
+    }
+    media
 }
 
 /// Sessions under `root` that ended without closing (their lock is free)
@@ -332,6 +356,11 @@ mod tests {
     use super::*;
     use fanimate_core::{LayerKind, samples};
     use std::process::Command;
+
+    /// Starting a process copies every open file into it until it runs its
+    /// program, session locks included, so a test that needs a dropped
+    /// session's lock released must not overlap the crash test's spawn.
+    static SPAWN: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     fn temp_root(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("fanimate-journal-{}-{name}", std::process::id()));
@@ -391,6 +420,7 @@ mod tests {
     #[test]
     fn saved_sessions_left_behind_are_cleaned_up_not_offered() {
         let root = temp_root("saved");
+        let _spawn = SPAWN.lock().unwrap_or_else(|e| e.into_inner());
         let journal = Journal::start(&root).unwrap();
         journal.record(&edited(2), Some(Path::new("scene.fnm")), false, None);
         journal.flush();
@@ -440,6 +470,7 @@ mod tests {
     #[test]
     fn work_survives_a_crashed_process() {
         let root = temp_root("crash");
+        let spawn = SPAWN.lock().unwrap_or_else(|e| e.into_inner());
         let status = Command::new(std::env::current_exe().unwrap())
             .args([
                 "--exact",
@@ -450,6 +481,7 @@ mod tests {
             .env(CHILD, format!("{}|17", root.display()))
             .status()
             .unwrap();
+        drop(spawn);
         assert!(!status.success(), "the child should have aborted");
 
         let found = find_recoverable(&root);

@@ -10,6 +10,12 @@ pub enum Action {
     OpenSample(Sample),
     Save,
     SaveAs,
+    /// Import pictures, Photoshop or SVG files, or sound.
+    Import,
+    /// Render the animation to a video, GIF or PNG sequence.
+    ExportVideo,
+    /// Show the render queue window.
+    RenderQueue,
     Quit,
     // Edit
     Undo,
@@ -38,12 +44,33 @@ pub enum Action {
     NewVectorLayer,
     NewGroupLayer,
     NewBoneLayer,
+    NewFramesLayer,
+    NewSwitchLayer,
     GroupLayers,
     Ungroup,
     MoveLayerUp,
     MoveLayerDown,
     ToggleVisibility,
     LayerProperties,
+    /// Give the selected layers this label colour.
+    SetLabel(fanimate_core::Label),
+    /// Bind shapes rigidly to the selected bone.
+    BindToBone,
+    /// Bind shapes to the bones around them, with automatic weights.
+    BindSmoothly,
+    /// Stop shapes following bones.
+    Unbind,
+    /// A new action on the bone layer, opened for editing.
+    NewAction,
+    /// A new Smart Bone action for the selected bone, opened for editing.
+    NewSmartBoneAction,
+    /// Edit action n of the bone layer.
+    EditAction(usize),
+    /// Stop editing the action and go back to the timeline.
+    FinishAction,
+    /// Copy action n into the timeline at the current frame.
+    InsertAction(usize),
+    DeleteAction(usize),
     // Animation
     PlayPause,
     NextFrame,
@@ -54,9 +81,21 @@ pub enum Action {
     PrevKey,
     AddKey,
     DeleteKey,
+    /// A blank drawing on the current frame of a frame-by-frame layer.
+    NewDrawing,
+    /// Show child n of the selected switch layer from the current frame.
+    SetSwitch(usize),
+    /// Key the selected switch layer's mouths from a sound, with Rhubarb.
+    LipSync,
+    /// The sub-layer the tools draw on in frame-by-frame layers.
+    SetPart(fanimate_core::Part),
     /// How the keys on the current frame move on to the next key.
     SetInterpolation(fanimate_core::Interpolation),
     // View
+    /// Show the drawings before and after this frame faintly.
+    ToggleOnionSkin,
+    /// Fade every layer but the selected ones.
+    ToggleLightTable,
     ZoomIn,
     ZoomOut,
     FitView,
@@ -78,6 +117,9 @@ impl Action {
             OpenSample(Sample::StressTest) => "Open Sample: Stress Test",
             Save => "Save",
             SaveAs => "Save As…",
+            Import => "Import…",
+            ExportVideo => "Export Video…",
+            RenderQueue => "Render Queue",
             Quit => "Quit",
             Undo => "Undo",
             Redo => "Redo",
@@ -100,12 +142,33 @@ impl Action {
             NewVectorLayer => "New Vector Layer",
             NewGroupLayer => "New Group",
             NewBoneLayer => "New Bone Layer",
+            NewFramesLayer => "New Frame-by-Frame Layer",
+            NewSwitchLayer => "New Switch Layer",
+            SetSwitch(_) => "Show This Layer",
+            LipSync => "Lip Sync from Sound…",
+            NewDrawing => "New Blank Drawing",
+            SetPart(p) => match p {
+                fanimate_core::Part::Rough => "Draw on Rough",
+                fanimate_core::Part::Colour => "Draw on Colour",
+                fanimate_core::Part::Line => "Draw on Line",
+                fanimate_core::Part::Overlay => "Draw on Overlay",
+            },
             GroupLayers => "Group Layers",
             Ungroup => "Ungroup",
             MoveLayerUp => "Move Layer Up",
             MoveLayerDown => "Move Layer Down",
             ToggleVisibility => "Show/Hide Layer",
             LayerProperties => "Layer Properties",
+            SetLabel(l) => l.name(),
+            BindToBone => "Bind to Selected Bone",
+            BindSmoothly => "Bind Smoothly",
+            Unbind => "Release from Bones",
+            NewAction => "New Action",
+            NewSmartBoneAction => "New Smart Bone Action",
+            EditAction(_) => "Edit Action",
+            FinishAction => "Finish Editing Action",
+            InsertAction(_) => "Insert Action Here",
+            DeleteAction(_) => "Delete Action",
             PlayPause => "Play/Pause",
             NextFrame => "Next Frame",
             PrevFrame => "Previous Frame",
@@ -120,6 +183,8 @@ impl Action {
                 fanimate_core::Interpolation::Linear => "Interpolation: Linear",
                 fanimate_core::Interpolation::Step => "Interpolation: Step",
             },
+            ToggleOnionSkin => "Onion Skin",
+            ToggleLightTable => "Light Table",
             ZoomIn => "Zoom In",
             ZoomOut => "Zoom Out",
             FitView => "Fit Canvas",
@@ -137,6 +202,9 @@ impl Action {
             Open,
             Save,
             SaveAs,
+            Import,
+            ExportVideo,
+            RenderQueue,
             Quit,
             Undo,
             Redo,
@@ -158,12 +226,20 @@ impl Action {
             NewVectorLayer,
             NewGroupLayer,
             NewBoneLayer,
+            NewFramesLayer,
+            NewSwitchLayer,
             GroupLayers,
             Ungroup,
             MoveLayerUp,
             MoveLayerDown,
             ToggleVisibility,
             LayerProperties,
+            BindToBone,
+            BindSmoothly,
+            Unbind,
+            NewAction,
+            NewSmartBoneAction,
+            FinishAction,
             PlayPause,
             NextFrame,
             PrevFrame,
@@ -173,12 +249,17 @@ impl Action {
             PrevKey,
             AddKey,
             DeleteKey,
+            NewDrawing,
+            LipSync,
+            ToggleOnionSkin,
+            ToggleLightTable,
             ZoomIn,
             ZoomOut,
             FitView,
             ActualSize,
         ];
         v.extend(fanimate_core::Interpolation::ALL.map(SetInterpolation));
+        v.extend(fanimate_core::Part::ALL.map(SetPart));
         v.extend(Sample::ALL.iter().map(|s| OpenSample(*s)));
         v.extend(crate::action::Tool::ALL.iter().map(|t| Tool(*t)));
         v
@@ -262,12 +343,13 @@ pub enum Tool {
     SelectBone,
     AddBone,
     ManipulateBones,
+    PaintWeights,
     Pan,
     Zoom,
 }
 
 impl Tool {
-    pub const ALL: [Tool; 16] = [
+    pub const ALL: [Tool; 17] = [
         Self::SelectPoints,
         Self::TranslatePoints,
         Self::AddPoint,
@@ -282,6 +364,7 @@ impl Tool {
         Self::SelectBone,
         Self::AddBone,
         Self::ManipulateBones,
+        Self::PaintWeights,
         Self::Pan,
         Self::Zoom,
     ];
@@ -302,6 +385,7 @@ impl Tool {
             Self::SelectBone => "Select Bone",
             Self::AddBone => "Add Bone",
             Self::ManipulateBones => "Manipulate Bones",
+            Self::PaintWeights => "Paint Weights",
             Self::Pan => "Pan",
             Self::Zoom => "Zoom",
         }
@@ -319,7 +403,7 @@ impl Tool {
             | Self::Eraser => ToolGroup::Draw,
             Self::PaintBucket | Self::Eyedropper => ToolGroup::Fill,
             Self::TransformLayer => ToolGroup::Layer,
-            Self::SelectBone | Self::AddBone | Self::ManipulateBones => ToolGroup::Bone,
+            Self::SelectBone | Self::AddBone | Self::ManipulateBones | Self::PaintWeights => ToolGroup::Bone,
             Self::Pan | Self::Zoom => ToolGroup::Workspace,
         }
     }
@@ -340,6 +424,10 @@ impl Tool {
                 | Self::PaintBucket
                 | Self::Eyedropper
                 | Self::TransformLayer
+                | Self::SelectBone
+                | Self::AddBone
+                | Self::ManipulateBones
+                | Self::PaintWeights
                 | Self::Pan
                 | Self::Zoom
         )
@@ -383,7 +471,18 @@ impl Tool {
             Self::Pen => {
                 "Click to add corner points, drag to add smooth ones. Click the first point to close the shape; Enter or Esc finishes an open path."
             }
-            Self::SelectBone | Self::AddBone | Self::ManipulateBones => "Bone tools arrive in milestone M3.",
+            Self::SelectBone => {
+                "Click a bone to select it. Drag its tip to change its length and rest angle, or its joint to move it."
+            }
+            Self::AddBone => {
+                "Drag to draw a bone on the selected bone layer. It joins the selected bone, so drag from its tip to build a chain."
+            }
+            Self::ManipulateBones => {
+                "Drag a bone to pose its chain (inverse kinematics; a pinned bone stops it). Alt-drag turns one bone only. Sets keyframes on the current frame."
+            }
+            Self::PaintWeights => {
+                "Select a bone, then brush over points of a bound vector layer to make them follow that bone more. Alt brushes them away from it."
+            }
         }
     }
 }

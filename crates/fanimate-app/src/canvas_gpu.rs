@@ -11,6 +11,9 @@ use fanimate_core::eval::Evaluator;
 use fanimate_core::{Affine2, Document, DrawItem, LayerId, Shape};
 use fanimate_render::{Mesh, RenderTarget, Renderer, Tessellator, View};
 
+/// How strongly the light table shows layers other than the selection.
+const LIGHT_TABLE_FADE: f32 = 0.25;
+
 const SAMPLE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 const RENDER_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
@@ -19,6 +22,20 @@ struct Target {
     render_view: wgpu::TextureView,
     id: egui::TextureId,
     size: [u32; 2],
+}
+
+/// Other frames shown faintly around the current one (onion skin), and
+/// layers faded back (light table). On the canvas only, never in renders.
+#[derive(Clone, Debug, Default)]
+pub struct Overlays {
+    /// (frame, tint colour, opacity) for each onion skin, drawn in order
+    /// under the current frame.
+    pub onion: Vec<(f32, fanimate_core::Color, f32)>,
+    /// Layers the onion skins show; `None` for all.
+    pub onion_layers: Option<Vec<LayerId>>,
+    /// With the light table on, the layers kept at full strength; others
+    /// are faded.
+    pub light_table: Option<Vec<LayerId>>,
 }
 
 pub struct CanvasGpu {
@@ -35,7 +52,7 @@ pub struct CanvasGpu {
 impl CanvasGpu {
     pub fn new(rs: &RenderState) -> Self {
         Self {
-            renderer: Renderer::new(&rs.device, RENDER_FORMAT, 4),
+            renderer: Renderer::new(&rs.device, &rs.queue, RENDER_FORMAT, 4),
             target: None,
             evaluator: Evaluator::default(),
             tess: Tessellator::new(),
@@ -58,6 +75,7 @@ impl CanvasGpu {
         view: &View,
         pasteboard: fanimate_core::Color,
         extra: Option<&Shape>,
+        overlays: &Overlays,
     ) -> egui::TextureId {
         let size = [size[0].max(1), size[1].max(1)];
         if self.target.as_ref().is_none_or(|t| t.size != size) {
@@ -73,14 +91,40 @@ impl CanvasGpu {
                 layer: LayerId(0),
                 index: 0,
                 shape: std::borrow::Cow::Borrowed(shape),
+                part: None,
+                image: None,
                 transform: Affine2::IDENTITY,
                 opacity: 1.0,
             });
         }
-        self.mesh.vertices.clear();
-        self.mesh.indices.clear();
+        if let Some(keep) = &overlays.light_table {
+            for item in &mut items {
+                if !keep.iter().any(|k| doc.is_within(item.layer, *k)) {
+                    item.opacity *= LIGHT_TABLE_FADE;
+                }
+            }
+        }
+        self.tess.clear(&mut self.mesh);
         self.tess.tolerance = 0.25 / view.zoom.max(0.01);
         self.tess.canvas(doc, &mut self.mesh);
+        // onion skins under the current frame, each in its tint
+        let mut onion = Evaluator::default();
+        for &(at, tint, opacity) in &overlays.onion {
+            let mut skin = Vec::new();
+            onion.evaluate_into(doc, at, &mut skin);
+            skin.retain(|i| {
+                overlays
+                    .onion_layers
+                    .as_ref()
+                    .is_none_or(|ls| ls.iter().any(|l| doc.is_within(i.layer, *l)))
+            });
+            for item in &mut skin {
+                item.opacity *= opacity;
+            }
+            self.tess.tint = Some(tint);
+            self.tess.draw_items(&skin, &mut self.mesh);
+        }
+        self.tess.tint = None;
         self.tess.draw_items(&items, &mut self.mesh);
         self.cpu_time = started.elapsed();
         self.shapes = items.len();
@@ -94,6 +138,8 @@ impl CanvasGpu {
             },
             view,
             &self.mesh,
+            &self.tess.runs,
+            &doc.media,
             pasteboard,
         );
         target.id

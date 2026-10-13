@@ -27,15 +27,46 @@ struct Settings {
     theme: Theme,
     welcome_done: bool,
     draw: DrawStyle,
+    onion: OnionSkin,
+    /// The format Export Video chose last.
+    export_format: fanimate_export::Format,
+}
+
+/// Onion skin settings, remembered between sessions.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OnionSkin {
+    pub on: bool,
+    /// How many earlier and later frames or drawings show.
+    pub before: usize,
+    pub after: usize,
+    /// Only frames with drawings or keys, rather than every frame.
+    pub keys: bool,
+    /// Every layer, rather than the selected ones.
+    pub all_layers: bool,
+}
+
+impl Default for OnionSkin {
+    fn default() -> Self {
+        Self {
+            on: false,
+            before: 2,
+            after: 1,
+            keys: true,
+            all_layers: false,
+        }
+    }
 }
 
 impl Default for Settings {
     fn default() -> Self {
         Self {
             keymap: KeymapKind::Fanimate.id().into(),
-            theme: Theme::Night,
+            theme: Theme::default(),
             welcome_done: false,
             draw: DrawStyle::default(),
+            onion: OnionSkin::default(),
+            export_format: Default::default(),
         }
     }
 }
@@ -98,6 +129,8 @@ pub struct UiState {
     pub open_tab: Option<Tab>,
     pub reset_layout: bool,
     pub window: titlebar::WindowState,
+    /// The Export Video window, while open.
+    pub export: Option<crate::export::ExportForm>,
 }
 
 /// Everything except the dock layout (kept apart so the dock and its tab
@@ -120,6 +153,16 @@ pub struct Shell {
     pub icon: egui::TextureHandle,
     /// The crash recovery journal, and work recovered from a crash.
     pub recovery: Recovery,
+    pub onion: OnionSkin,
+    /// Fade every layer but the selected ones.
+    pub light_table: bool,
+    /// Plays audio layers along with playback.
+    pub audio: crate::audio::Audio,
+    /// A lip sync waiting on Rhubarb.
+    pub lipsync: Option<crate::lipsync::Job>,
+    pub export_format: fanimate_export::Format,
+    /// Renders queued from here, for the status bar.
+    pub renders: crate::export::Renders,
     last_tick: Instant,
     allow_close: bool,
 }
@@ -196,6 +239,12 @@ impl FanimateApp {
             shell: Shell {
                 icon,
                 recovery: Recovery::new(recovery_root),
+                onion: settings.onion,
+                light_table: false,
+                audio: Default::default(),
+                lipsync: None,
+                export_format: settings.export_format,
+                renders: Default::default(),
                 editor,
                 keymap: Keymap::new(KeymapKind::from_id(&settings.keymap).unwrap_or_default()),
                 theme: settings.theme,
@@ -248,7 +297,7 @@ pub fn default_layout() -> DockState<Tab> {
         vec![Tab::Properties, Tab::Style, Tab::Actions, Tab::History],
     );
     s.split_below(right, 0.42, vec![Tab::Layers]);
-    let [canvas, _timeline] = s.split_below(left, 0.70, vec![Tab::Timeline]);
+    let [canvas, _timeline] = s.split_below(left, 0.70, vec![Tab::Timeline, Tab::XSheet]);
     s.split_left(canvas, 0.09, vec![Tab::Tools]);
     dock
 }
@@ -269,6 +318,10 @@ impl eframe::App for FanimateApp {
         let dt = (now - shell.last_tick).as_secs_f32().min(0.25);
         shell.last_tick = now;
         shell.editor.tick(dt);
+        shell
+            .audio
+            .follow(&shell.editor.doc, shell.editor.playing, shell.editor.frame);
+        crate::lipsync::poll(&ctx, shell);
 
         handle_close_request(&ctx, shell);
         titlebar::track_window(&ctx, &mut shell.ui.window);
@@ -298,6 +351,11 @@ impl eframe::App for FanimateApp {
             });
 
         dialogs::show(&ctx, shell);
+        crate::export::window(&ctx, shell);
+        {
+            let Shell { renders, editor, .. } = shell;
+            renders.poll(&ctx, &mut |kind, message| editor.set_status(kind, message));
+        }
         titlebar::resize_edges(&ctx, &shell.ui.window);
         native_cursors(&ctx);
 
@@ -357,6 +415,8 @@ impl eframe::App for FanimateApp {
                 theme: s.theme,
                 welcome_done: !s.ui.show_welcome,
                 draw: s.editor.draw,
+                onion: s.onion,
+                export_format: s.export_format,
             },
         );
         eframe::set_value(storage, DOCK_KEY, &self.dock);
@@ -489,6 +549,18 @@ pub fn run_unchecked(ctx: &egui::Context, shell: &mut Shell, action: Action) {
             Action::SaveAs => {
                 save(shell, true);
             }
+            Action::Import => import_dialog(shell),
+            Action::LipSync => crate::lipsync::start(shell),
+            Action::ExportVideo => {
+                shell.ui.export = Some(crate::export::ExportForm::new(shell, shell.export_format));
+            }
+            Action::RenderQueue => {
+                if let Err(e) = crate::render_queue::open(shell.theme) {
+                    shell.editor.set_status(StatusKind::Error, e);
+                }
+            }
+            Action::ToggleOnionSkin => shell.onion.on = !shell.onion.on,
+            Action::ToggleLightTable => shell.light_table = !shell.light_table,
             Action::Quit => {
                 shell.allow_close = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -510,6 +582,45 @@ pub fn run_unchecked(ctx: &egui::Context, shell: &mut Shell, action: Action) {
 
 fn zoom_by(shell: &mut Shell, factor: f32) {
     shell.view.zoom = (shell.view.zoom * factor).clamp(0.02, 64.0);
+}
+
+/// Pick pictures, Photoshop or SVG files, or sounds, and import them as
+/// layers.
+fn import_dialog(shell: &mut Shell) {
+    let Some(paths) = rfd::FileDialog::new()
+        .set_title("Import pictures, a Photoshop file or sound")
+        .add_filter(
+            "Pictures, Photoshop files and sound",
+            &["png", "jpg", "jpeg", "psd", "wav"],
+        )
+        .pick_files()
+    else {
+        return;
+    };
+    for path in paths {
+        let name = path.display().to_string();
+        let result = std::fs::read(&path).map_err(|e| e.to_string()).and_then(|bytes| {
+            let ext = path
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            match ext.as_str() {
+                "psd" => shell.editor.import_psd(&name, &bytes),
+                "svg" => shell.editor.import_svg(&name, &bytes),
+                "wav" => shell.editor.import_audio(&name, bytes),
+                _ => shell.editor.import_picture(&name, bytes),
+            }
+        });
+        if let Err(e) = result {
+            let file = path
+                .file_name()
+                .map_or(name.clone(), |f| f.to_string_lossy().into_owned());
+            shell
+                .editor
+                .set_status(StatusKind::Error, format!("Could not import {file}: {e}"));
+            return;
+        }
+    }
 }
 
 fn open_dialog(shell: &mut Shell) {

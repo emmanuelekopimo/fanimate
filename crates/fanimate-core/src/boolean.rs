@@ -59,6 +59,19 @@ pub fn combine(paths: &[&Path], op: BoolOp, tolerance: f32) -> Path {
     to_path(&acc, tolerance)
 }
 
+/// The area `path` covers when filled by the even-odd rule (as SVG files
+/// may ask), as a path the renderer's non-zero rule fills the same way.
+pub fn even_odd(path: &Path, tolerance: f32) -> Path {
+    let tolerance = if tolerance.is_finite() && tolerance > 0.0 {
+        tolerance
+    } else {
+        0.25
+    };
+    let empty: Contours = Vec::new();
+    let filled = contours(path).overlay(&empty, OverlayRule::Subject, FillRule::EvenOdd);
+    to_path(&flat(filled), tolerance)
+}
+
 /// The path's subpaths as closed polygons, dropping any too small to fill.
 fn contours(path: &Path) -> Contours {
     path.polylines(FLATTEN_TOLERANCE)
@@ -268,6 +281,19 @@ mod tests {
         assert!(!shape.contains(Vec2::ZERO, 0.0));
         let expected = std::f32::consts::PI * (400.0 - 100.0);
         assert!((area(&ring) - expected).abs() / expected < 0.01);
+    }
+
+    #[test]
+    fn even_odd_overlaps_become_holes() {
+        // two squares wound the same way: non-zero fills both, even-odd
+        // leaves the inner one empty
+        let mut both = square(0.0, 0.0, 30.0);
+        both.cmds.extend(square(10.0, 10.0, 10.0).cmds);
+        let ring = even_odd(&both, 0.1);
+        let shape = Shape::new("ring", ring.clone(), Style::fill(Color::BLACK));
+        assert!(shape.contains(Vec2::new(5.0, 5.0), 0.0));
+        assert!(!shape.contains(Vec2::new(15.0, 15.0), 0.0));
+        assert!((area(&ring) - 800.0).abs() < 0.5);
     }
 
     #[test]

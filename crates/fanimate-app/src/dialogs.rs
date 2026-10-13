@@ -313,6 +313,7 @@ fn about(ctx: &egui::Context, shell: &mut Shell) {
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
+        .max_width(380.0)
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.add(egui::Image::new((shell.icon.id(), egui::vec2(48.0, 48.0))));
@@ -330,6 +331,19 @@ fn about(ctx: &egui::Context, shell: &mut Shell) {
                 "github.com/toonittmedia/fanimate",
                 "https://github.com/toonittmedia/fanimate",
             );
+            ui.add_space(6.0);
+            // separate programs shipped with Fanimate, under their own licences
+            let muted = shell.palette.text_muted;
+            ui.label(RichText::new("Ships with").strong());
+            ui.label(
+                RichText::new(
+                    "FFmpeg and x264 for video export (GPL 2.0 or later), run as a separate program; \
+                     their sources are published with each release.",
+                )
+                .color(muted),
+            );
+            ui.label(RichText::new("Rhubarb Lip Sync for lip sync (MIT).").color(muted));
+            ui.label(RichText::new("Inter font (OFL 1.1) and Lucide icons (ISC).").color(muted));
         });
     shell.ui.show_about = open;
 }

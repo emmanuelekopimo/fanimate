@@ -12,6 +12,9 @@ mod history;
 mod keymap;
 
 pub use action::{Action, Sample, Tool, ToolGroup};
-pub use editor::{DrawStyle, Editor, Outcome, Placement, PointRef, SelectMode, StatusKind};
+pub use editor::{
+    BoneRef, DrawStyle, Editor, MouthCue, Outcome, Placement, PointRef, SelectMode, SoundInfo, StatusKind,
+    parse_rhubarb, sound_info,
+};
 pub use history::History;
 pub use keymap::{Chord, Keymap, KeymapKind};

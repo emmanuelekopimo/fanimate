@@ -1,8 +1,10 @@
 //! The wgpu pipeline that draws tessellated meshes.
 
-use fanimate_core::{Color, Vec2};
+use std::collections::HashMap;
 
-use crate::tess::{Mesh, Vertex};
+use fanimate_core::{Color, Media, Vec2};
+
+use crate::tess::{Mesh, Run, Vertex};
 
 const SHADER: &str = r#"
 struct Globals {
@@ -11,22 +13,29 @@ struct Globals {
 };
 @group(0) @binding(0) var<uniform> g: Globals;
 
+@group(1) @binding(0) var tex: texture_2d<f32>;
+@group(1) @binding(1) var samp: sampler;
+
 struct VOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) color: vec4<f32>,
+    @location(1) uv: vec2<f32>,
 };
 
 @vertex
-fn vs(@location(0) p: vec2<f32>, @location(1) c: vec4<f32>) -> VOut {
+fn vs(@location(0) p: vec2<f32>, @location(1) c: vec4<f32>, @location(2) uv: vec2<f32>) -> VOut {
     var o: VOut;
     o.pos = vec4<f32>(p * g.scale + g.offset, 0.0, 1.0);
     o.color = c;
+    o.uv = uv;
     return o;
 }
 
 @fragment
 fn fs(i: VOut) -> @location(0) vec4<f32> {
-    return i.color;
+    // flat colour samples a white pixel; pictures are straight alpha
+    let t = textureSample(tex, samp, i.uv);
+    return vec4<f32>(t.rgb * t.a, t.a) * i.color;
 }
 "#;
 
@@ -80,11 +89,25 @@ pub struct Renderer {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     msaa: Option<(wgpu::TextureView, (u32, u32))>,
+    texture_layout: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
+    /// A white pixel, for flat colour.
+    white: wgpu::BindGroup,
+    /// A grey pixel, shown for a picture that is missing or unreadable.
+    missing: wgpu::BindGroup,
+    /// Uploaded pictures by media name, with the bytes they came from so a
+    /// changed file is uploaded again.
+    textures: HashMap<String, (std::sync::Arc<fanimate_core::MediaFile>, wgpu::BindGroup)>,
 }
 
 impl Renderer {
     /// `format` is the target texture format; `sample_count` is 1 or 4.
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, sample_count: u32) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("fanimate shapes"),
             source: wgpu::ShaderSource::Wgsl(SHADER.into()),
@@ -116,9 +139,36 @@ impl Renderer {
                 resource: globals.as_entire_binding(),
             }],
         });
+        let texture_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("fanimate picture"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("fanimate picture"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("fanimate shapes"),
-            bind_group_layouts: &[Some(&layout)],
+            bind_group_layouts: &[Some(&layout), Some(&texture_layout)],
             immediate_size: 0,
         });
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -131,7 +181,7 @@ impl Renderer {
                 buffers: &[Some(wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<Vertex>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4],
+                    attributes: &wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x4, 2 => Float32x2],
                 })],
             },
             primitive: wgpu::PrimitiveState::default(),
@@ -154,6 +204,7 @@ impl Renderer {
             cache: None,
         });
 
+        let pixel = |rgba: [u8; 4]| texture_bind_group(device, queue, &texture_layout, &sampler, 1, 1, &rgba);
         Self {
             format,
             sample_count,
@@ -163,10 +214,56 @@ impl Renderer {
             vertices: empty_buffer(device, wgpu::BufferUsages::VERTEX),
             indices: empty_buffer(device, wgpu::BufferUsages::INDEX),
             msaa: None,
+            white: pixel([255; 4]),
+            missing: pixel([128, 128, 128, 160]),
+            texture_layout,
+            sampler,
+            textures: HashMap::new(),
         }
     }
 
-    /// Draw `mesh` into `target`, clearing it to `clear`.
+    /// The bind group for picture `name`, uploading it on first use.
+    fn texture(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        media: &Media,
+        name: &str,
+    ) -> &wgpu::BindGroup {
+        let Some(file) = media.get(name) else {
+            return &self.missing;
+        };
+        let fresh = self
+            .textures
+            .get(name)
+            .is_some_and(|(f, _)| std::sync::Arc::ptr_eq(f, file));
+        if !fresh {
+            match image::load_from_memory(&file.bytes) {
+                Ok(img) => {
+                    let rgba = img.to_rgba8();
+                    let group = texture_bind_group(
+                        device,
+                        queue,
+                        &self.texture_layout,
+                        &self.sampler,
+                        rgba.width(),
+                        rgba.height(),
+                        rgba.as_raw(),
+                    );
+                    self.textures.insert(name.to_owned(), (file.clone(), group));
+                }
+                Err(e) => {
+                    log::warn!("picture {name} could not be read: {e}");
+                    return &self.missing;
+                }
+            }
+        }
+        &self.textures[name].1
+    }
+
+    /// Draw `mesh` into `target`, clearing it to `clear`. `runs` say which
+    /// triangles show which picture from `media`.
+    #[allow(clippy::too_many_arguments)]
     pub fn render(
         &mut self,
         device: &wgpu::Device,
@@ -174,8 +271,16 @@ impl Renderer {
         target: RenderTarget<'_>,
         view: &View,
         mesh: &Mesh,
+        runs: &[Run],
+        media: &Media,
         clear: Color,
     ) {
+        // upload any new pictures before the pass borrows the cache
+        for run in runs {
+            if let Some(name) = &run.media {
+                self.texture(device, queue, media, name);
+            }
+        }
         let RenderTarget { view: target, size } = target;
         let g = [view.scale.x, view.scale.y, view.offset.x, view.offset.y];
         queue.write_buffer(&self.globals, 0, bytemuck::cast_slice(&g));
@@ -248,11 +353,84 @@ impl Renderer {
                 pass.set_bind_group(0, &self.bind_group, &[]);
                 pass.set_vertex_buffer(0, self.vertices.slice(..));
                 pass.set_index_buffer(self.indices.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.indices.len() as u32, 0, 0..1);
+                let total = mesh.indices.len() as u32;
+                // everything before the first run, and any run, is drawn
+                // with its picture or the white pixel
+                let mut starts: Vec<(u32, Option<&str>)> = vec![(0, None)];
+                starts.extend(runs.iter().map(|r| (r.first, r.media.as_deref())));
+                for (i, &(first, name)) in starts.iter().enumerate() {
+                    let end = starts.get(i + 1).map_or(total, |s| s.0).min(total);
+                    if first >= end {
+                        continue;
+                    }
+                    let group = match name {
+                        None => &self.white,
+                        Some(n) => match media.get(n) {
+                            Some(_) => self.textures.get(n).map_or(&self.missing, |t| &t.1),
+                            None => &self.missing,
+                        },
+                    };
+                    pass.set_bind_group(1, group, &[]);
+                    pass.draw_indexed(first..end, 0, 0..1);
+                }
             }
         }
         queue.submit([encoder.finish()]);
     }
+}
+
+/// A texture of `width` by `height` RGBA8 sRGB pixels, ready to sample.
+fn texture_bind_group(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    layout: &wgpu::BindGroupLayout,
+    sampler: &wgpu::Sampler,
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+) -> wgpu::BindGroup {
+    let size = wgpu::Extent3d {
+        width: width.max(1),
+        height: height.max(1),
+        depth_or_array_layers: 1,
+    };
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("fanimate picture"),
+        size,
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    });
+    let layout_info = wgpu::TexelCopyBufferLayout {
+        offset: 0,
+        bytes_per_row: Some(4 * size.width),
+        rows_per_image: Some(size.height),
+    };
+    let copy = wgpu::TexelCopyTextureInfo {
+        texture: &texture,
+        mip_level: 0,
+        origin: wgpu::Origin3d::ZERO,
+        aspect: wgpu::TextureAspect::All,
+    };
+    queue.write_texture(copy, rgba, layout_info, size);
+    let view = texture.create_view(&Default::default());
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("fanimate picture"),
+        layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::TextureView(&view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Sampler(sampler),
+            },
+        ],
+    })
 }
 
 fn empty_buffer(device: &wgpu::Device, usage: wgpu::BufferUsages) -> wgpu::Buffer {

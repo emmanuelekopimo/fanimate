@@ -5,6 +5,8 @@
 //! fanimate scene.fnm             open a project
 //! fanimate --bench [--bones N]   play the benchmark rig for 10 s, print fps
 //!   --no-vsync                   present as fast as possible
+//! fanimate --render-queue        the render queue window (the editor opens it)
+//!   --theme <id>                 in this theme
 //! ```
 //!
 //! On Windows this is a GUI program, so opening it shows no console window.
@@ -16,12 +18,16 @@
 #![windows_subsystem = "windows"]
 
 mod app;
+mod audio;
 mod canvas_gpu;
 mod dialogs;
+mod export;
 mod icons;
+mod lipsync;
 mod menus;
 mod panels;
 mod recovery;
+mod render_queue;
 mod theme;
 mod titlebar;
 
@@ -61,6 +67,8 @@ struct Args {
     file: Option<PathBuf>,
     bench_bones: Option<usize>,
     vsync: bool,
+    render_queue: bool,
+    theme: Option<theme::Theme>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -69,6 +77,8 @@ fn parse_args() -> Result<Args, String> {
         file: None,
         bench_bones: None,
         vsync: true,
+        render_queue: false,
+        theme: None,
     };
     let mut bench = false;
     let mut bones = 40;
@@ -76,6 +86,11 @@ fn parse_args() -> Result<Args, String> {
         match a.as_str() {
             "--bench" => bench = true,
             "--no-vsync" => out.vsync = false,
+            "--render-queue" => out.render_queue = true,
+            "--theme" => {
+                let id = args.next().ok_or("--theme needs a theme")?;
+                out.theme = Some(theme::Theme::from_id(&id).ok_or(format!("unknown theme {id}"))?);
+            }
             "--bones" => {
                 bones = args
                     .next()
@@ -109,6 +124,9 @@ fn main() -> eframe::Result {
             std::process::exit(2);
         }
     };
+    if args.render_queue {
+        return render_queue::run(args.theme.unwrap_or_default());
+    }
 
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Fanimate")

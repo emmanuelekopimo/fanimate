@@ -6,8 +6,8 @@
 
 use std::collections::BTreeSet;
 
+use fanimate_core::Shape;
 use fanimate_core::boolean::{self, BoolOp};
-use fanimate_core::{LayerKind, Shape};
 
 use super::{Editor, StatusKind};
 
@@ -47,7 +47,7 @@ impl Editor {
             );
             return false;
         }
-        let Some(LayerKind::Vector { shapes }) = self.doc.find(layer).map(|l| &l.kind) else {
+        let Some(shapes) = self.layer_shapes(layer) else {
             return false;
         };
         let picked: Vec<&Shape> = operands.iter().filter_map(|&i| shapes.get(i)).collect();
@@ -114,7 +114,7 @@ impl Editor {
             BoolOp::Subtract => "Subtract shape",
             BoolOp::Intersect => "Intersect shapes",
         });
-        if let Some(LayerKind::Vector { shapes }) = self.doc.find_mut(layer).map(|l| &mut l.kind) {
+        if let Some(shapes) = self.layer_shapes_mut(layer) {
             // back to front, so earlier indices stay valid
             for (i, shape) in results.into_iter().rev() {
                 match shape {
@@ -135,6 +135,7 @@ impl Editor {
 mod tests {
     use super::*;
     use crate::{Action, Tool};
+    use fanimate_core::LayerKind;
     use fanimate_core::{LayerId, Vec2};
 
     /// Two overlapping 100x100 squares, all their points selected.

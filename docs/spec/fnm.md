@@ -1,6 +1,6 @@
 # The `.fnm` project format
 
-**Current version: 2. Status: draft.** The format may still change before Fanimate 1.0, but every change that older readers would misread bumps the version, and Fanimate always opens files written by earlier versions. See [Version history](#version-history).
+**Current version: 3. Status: draft.** The format may still change before Fanimate 1.0, but every change that older readers would misread bumps the version, and Fanimate always opens files written by earlier versions. See [Version history](#version-history).
 
 The reference implementation is the [`fanimate-fnm`](../../crates/fanimate-fnm/) crate.
 
@@ -19,14 +19,20 @@ A project is a folder whose name ends in `.fnm`:
 scene.fnm/
 ├── manifest.json
 ├── document.json
-└── layers/
-    ├── 0002.json
-    └── 0005.json
+├── layers/
+│   ├── 0002.json
+│   └── 0005.json
+└── media/
+    └── 9f3a…-20481.png
 ```
 
 A single-file form (the same folder in a zip archive) is planned and will get its own extension.
 
 All files are UTF-8 JSON. Whitespace is not significant; Fanimate writes them indented, with a final newline.
+
+## Media files
+
+Pictures used by image layers live in the `media` folder, as PNG or JPEG files, and sounds used by audio layers as WAV files. Fanimate names each file after its content (a hash and the size in bytes), so the same picture is stored once and a file never changes once written. A file no layer uses is not saved. A missing file does not stop the project opening: a picture shows as a grey placeholder and a sound is silent.
 
 ## `manifest.json`
 
@@ -35,7 +41,7 @@ Identifies the folder as a Fanimate project.
 ```json
 {
   "format": "fnm",
-  "version": 2,
+  "version": 3,
   "generator": "fanimate 0.0.6"
 }
 ```
@@ -84,10 +90,11 @@ Each file in `layers/` holds one top-level layer. Child layers of groups and bon
 |---|---|---|
 | `id` | integer | Unique within the project; stable for the layer's life |
 | `name` | string | Display name |
+| `label` | string | Optional (version 3). Label colour: `"red"`, `"orange"`, `"yellow"`, `"lime"`, `"green"`, `"teal"`, `"cyan"`, `"blue"`, `"violet"` or `"pink"`. Without it, Fanimate shows the colour at position `id` mod 10 in that list. Readers ignore names they do not know. |
 | `visible` | boolean | Optional, default `true` |
 | `opacity` | [channel](#channels) of number | 0 to 1. Multiplies with ancestors' opacity. |
 | `transform` | object | `position` (channel of [vector](#vectors)), `rotation` (channel of number, radians), `scale` (channel of vector) |
-| `type` | string | `"vector"`, `"group"` or `"bone"`; decides the remaining fields |
+| `type` | string | `"vector"`, `"group"`, `"bone"`, `"image"`, `"frames"`, `"switch"` or `"audio"` (the last four version 3); decides the remaining fields |
 
 A layer's transform applies scale, then rotation, then position, relative to its parent.
 
@@ -103,6 +110,69 @@ A layer's transform applies scale, then rotation, then position, relative to its
 |---|---|---|
 | `children` | array of layers | Drawn first to last |
 
+### `"type": "frames"`
+
+Frame-by-frame animation: a list of drawings, each shown from its frame until the next drawing's frame (its exposure). Version 3.
+
+```json
+{"type": "frames", "cels": [
+  {"frame": 0, "line": [], "colour": []},
+  {"frame": 4, "rough": [], "line": []}
+]}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `cels` | array | Drawings, sorted by `frame`, at most one per frame, no negative frames. |
+| `cels[].frame` | integer | The first frame the drawing is shown on |
+| `cels[].rough`, `.colour`, `.line`, `.overlay` | arrays of [shapes](#shapes) | Optional. The drawing's sub-layers, drawn in that order (rough at the bottom). Renders leave `rough` out. |
+
+Nothing is shown before the first drawing. Shapes in drawings may be bound to bones like any shape.
+
+### `"type": "switch"`
+
+Shows one child at a time, such as mouth shapes for lip sync, hands or eyes. Version 3.
+
+```json
+{"type": "switch", "children": [], "switch": [
+  {"frame": 0, "value": "rest", "interp": "step"},
+  {"frame": 6, "value": "AI", "interp": "step"}
+]}
+```
+
+| Field | Type | Meaning |
+|---|---|---|
+| `children` | array of layers | The layers to choose from |
+| `switch` | array of [channel keys](#channels) whose values are strings | Optional. From each key's frame on, the child whose `name` matches the key's value (ignoring case) is shown. Sorted, one per frame, no negative frames. `interp` is written as `"step"` and has no other meaning here. |
+
+Before the first key, or when a key names no child, the last child (the top of the stack) is shown.
+
+### `"type": "audio"`
+
+Sound on the timeline. Version 3. It draws nothing.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `media` | string | The WAV file, under the same rules as an image's `media` |
+| `start` | integer | Optional, default 0. The frame the sound starts on; negative starts it part-way through. |
+| `volume` | number | Optional, default 1 (as recorded). 0 is silent. Not negative. |
+
+A hidden audio layer is silent.
+
+### `"type": "image"`
+
+A picture, such as one layer of an imported Photoshop file. Version 3.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `media` | string | The picture file, relative to the project folder: `media/` and a file name of letters, digits, `-`, `_` and `.` only. Readers must not read any other path. |
+| `width`, `height` | number | Size in document units. The picture spans (0, 0) to (width, height) in the layer's space. Positive. |
+| `grid` | `[columns, rows]` | Optional, default `[1, 1]`. The mesh the picture bends on: this many cells each way, 1 to 64. |
+| `bone` | integer | Optional. Bone it follows rigidly, as for shapes. |
+| `skin` | array | Optional. [Smooth binding](#smooth-binding) weights, one entry per mesh vertex (`(columns + 1) × (rows + 1)`), row by row from the top left. Takes the place of `bone`. |
+
+The picture is drawn on the mesh: its vertices, evenly spaced over the picture, move with their bones and the picture stretches between them.
+
 ### `"type": "bone"`
 
 A skeleton. Shapes on vector layers anywhere inside `children` can bind to its bones.
@@ -110,6 +180,7 @@ A skeleton. Shapes on vector layers anywhere inside `children` can bind to its b
 | Field | Type | Meaning |
 |---|---|---|
 | `skeleton.bones` | array of [bones](#bones) | Parents always come before their children |
+| `skeleton.actions` | array of [actions](#actions) | Optional (version 3) |
 | `children` | array of layers | Drawn first to last |
 
 ## Shapes
@@ -132,6 +203,7 @@ A skeleton. Shapes on vector layers anywhere inside `children` can bind to its b
 | `bone` | integer | Optional. Index of the bone this shape follows, in the nearest enclosing bone layer. |
 | `widths` | array of numbers | Optional (version 1). The stroke's [width profile](#width-profiles). |
 | `path_keys` | array of keys | Optional (version 2). [Point keyframes](#point-keyframes): the path at chosen frames. |
+| `skin` | array | Optional (version 3). [Smooth binding](#smooth-binding): per on-curve point, the bones it follows. Takes the place of `bone`. |
 
 A bound shape's points are stored in the **rest pose**. At each frame the shape moves rigidly with its bone: from the bone's rest transform to its current transform. Weighted deformation (one point following several bones) will be added in a later version.
 
@@ -153,6 +225,19 @@ Brush strokes vary in width along their length, from pen pressure and tapered en
 - Values are finite and not negative. A profile whose length does not match the path is ignored: the stroke is drawn at `style.stroke.width` everywhere.
 - A stroke with a profile has round caps and round joins. Without one, caps are flat (butt) and joins are mitred.
 - `widths` has no effect on fills, or on a shape without a stroke.
+
+### Smooth binding
+
+A shape can follow several bones, each point blending their movements, so limbs bend smoothly at joints:
+
+```json
+"skin": [[[0, 1.0]], [[0, 0.6], [1, 0.4]], [[1, 1.0]]]
+```
+
+- One entry per **on-curve point**, in order, as for `widths`. Each entry is a list of `[bone, weight]` pairs; `bone` indexes the nearest enclosing bone layer's skeleton.
+- Weights are finite and not negative. They are normalised when drawn, so they need not add up to 1; a point whose weights add up to 0 does not move.
+- At each frame a point moves by the weighted average of its bones' movements from their rest transforms to their current ones. A curve handle moves with the on-curve point it leaves from (the first control point of a `C`) or arrives at (the second).
+- Points (and point keys) are stored in the rest pose. A `skin` whose length does not match the path's on-curve points is ignored.
 
 ### Point keyframes
 
@@ -207,8 +292,44 @@ Every subpath starts with `M`. Drawing commands with no open subpath (before the
 | `origin` | vector | Joint position in the parent bone's space (x along the parent bone), or in the bone layer's space for a root bone |
 | `length` | number | Bone length |
 | `angle` | channel of number | Rotation relative to the parent, radians. `base` is the **rest pose**. |
+| `limits` | `[min, max]` | Optional (version 3). Lowest and highest angle, radians; the angle is kept within them when drawn and posed. |
+| `pinned` | boolean | Optional (version 3), default `false`. Inverse kinematics does not move this bone or past it. |
+| `strength` | number | Optional (version 3). How far the bone reaches when weights are made automatically; default half its length. |
 
 Each bone's local space has its origin at the joint and +x pointing along the bone. Its transform at a frame is `parent_world × translate(origin) × rotate(angle)`.
+
+## Actions
+
+An action is a short animation kept on a bone layer, outside the main timeline.
+
+```json
+{
+  "name": "head",
+  "driver": 0,
+  "length": 24,
+  "bones": [{"bone": 0, "angle": {"base": 0.0, "keys": [{"frame": 0, "value": 0.0}, {"frame": 24, "value": 1.57}]}}],
+  "shapes": [{"layer": 4, "shape": 0, "path_keys": [{"frame": 0, "value": []}, {"frame": 24, "value": []}]}]
+}
+```
+
+(Paths shortened.)
+
+| Field | Type | Meaning |
+|---|---|---|
+| `name` | string | Display name |
+| `driver` | integer | Optional. Makes this a **Smart Bone action**: the index of the bone whose angle plays it. |
+| `length` | integer | Last frame of the action, which starts at frame 0. Positive. |
+| `bones` | array | Optional. Bone angle [channels](#channels) the action animates: `bone` (index) and `angle`. |
+| `shapes` | array | Optional. [Point keys](#point-keyframes) of shapes in vector layers inside the bone layer (not inside nested bone layers): `layer` (id), `shape` (index in it) and `path_keys`. |
+
+**Regular actions** (no `driver`) are clips the user copies into the timeline; they do not affect drawing by themselves.
+
+**Smart Bone actions** play by themselves:
+
+1. The driver's angle, as the timeline poses it, is looked up on the action's own keys for the driver, giving a frame of the action. Between two keys the frame is found by solving the channel for the angle; before the first or after the last key, the nearest end is used. An action whose driver has fewer than two keys does nothing.
+2. Every other bone in `bones` turns by its channel's value at that frame minus its value at frame 0.
+3. Every shape in `shapes` moves point by point by its keys' path at that frame minus their path at frame 0. Keys whose commands differ from the shape's path are ignored.
+4. Several Smart Bone actions add up. Smart Bone actions do not move their own drivers or drive each other.
 
 ## Channels
 
@@ -279,6 +400,25 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | Point keyframes on negative frames, out of order, duplicated or not finite | Error | As for channel keys |
 | Negative or non-finite value in a width profile | Error | Non-finite becomes 1, negative becomes 0 |
 | Shape bound to a bone that does not exist, or outside any bone layer | Warning | Unbind the shape |
+| `skin` whose length does not match the path's on-curve points | Error | Remove the skin |
+| `skin` weight naming a missing bone, or not a finite non-negative number | Error | Remove that weight |
+| `skin` outside any bone layer | Warning | Remove the skin |
+| Bone `limits` not a finite range with min ≤ max | Error | Remove the limits |
+| Bone `strength` not a positive number | Warning | Use the default |
+| Drawings on negative frames | Error | Remove them |
+| Drawings out of order or two on one frame | Error | Sort; of two on one frame, keep the later in the file |
+| Image or audio `media` name outside the `media` folder | Error | None; the file is not read |
+| Image picture file missing | Warning | None; drawn as a grey placeholder |
+| Image size not positive | Error | Set to 100 × 100 |
+| Image `grid` outside 1 to 64 | Error | Clamp it and remove the `skin` |
+| Image `skin` not matching the mesh, or naming missing bones | Error | Remove the `skin` |
+| Switch keys out of order, duplicated or negative | Error | As for channel keys |
+| Audio `volume` negative or not finite | Error | Set to 1 |
+| Sound file missing | Warning | None; the layer is silent |
+| Action whose `driver` does not exist | Error | Remove the action |
+| Action `length` not positive | Error | Set to 1 |
+| Action keys for a bone that does not exist | Error | Remove those keys |
+| Action keys out of order, duplicated, negative or not finite | Error | As for channel keys |
 | Keyframe after the `end` frame | Warning | None; the key is kept |
 | Opacity outside 0 to 1 | Warning | None; clamped when drawn |
 
@@ -296,3 +436,4 @@ Readers should validate on load. Fanimate's validator reports, and on request re
 | 0 | Fanimate 0.0.1 | First version: layers, shapes, bones, channels | |
 | 1 | Development builds after Fanimate 0.0.5 (never released) | Shapes may have a stroke width profile (`widths`), written by the brush | Version 0 files need no conversion. A version 0 reader would ignore `widths` and draw brush strokes at one width, so the version was bumped. |
 | 2 | Fanimate 0.0.6 | Shapes may have point keyframes (`path_keys`) | Older files need no conversion. An older reader would ignore `path_keys` and draw animated drawings without their animation, so the version was bumped. |
+| 3 | Fanimate 0.0.7 | Layers may have a label colour (`label`); bones may have `limits`, `pinned` and `strength`; shapes may have a smooth binding (`skin`); bone layers may have actions and Smart Bone actions; image layers and the `media` folder; frame-by-frame, switch and audio layers | Older files need no conversion. An older reader would drop labels and draw smoothly bound artwork unbound, so the version was bumped. |

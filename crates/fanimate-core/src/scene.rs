@@ -30,6 +30,14 @@ pub struct Document {
     pub layers: Vec<Layer>,
     /// Next unused layer id.
     pub next_layer_id: u32,
+    /// The action being edited, if any (see [`crate::actions`]). Never in
+    /// a saved project: saving writes [`Document::mainline`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_edit: Option<crate::actions::ActionEdit>,
+    /// Image files used by image layers (see [`crate::media`]). Saved as
+    /// files beside the layers, not in the document's own data.
+    #[serde(skip)]
+    pub media: crate::media::Media,
 }
 
 impl Document {
@@ -44,6 +52,8 @@ impl Document {
             background: Color::WHITE,
             layers: Vec::new(),
             next_layer_id: 1,
+            action_edit: None,
+            media: Default::default(),
         }
     }
 
@@ -197,10 +207,79 @@ impl Document {
     }
 }
 
+/// A layer's label colour, as in the Layers panel and on its timeline row,
+/// so related layers are easy to find. The colours themselves come from the
+/// brand tokens; only the name is stored.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Label {
+    Red,
+    Orange,
+    Yellow,
+    Lime,
+    Green,
+    Teal,
+    Cyan,
+    Blue,
+    Violet,
+    Pink,
+}
+
+impl Label {
+    pub const ALL: [Label; 10] = [
+        Self::Red,
+        Self::Orange,
+        Self::Yellow,
+        Self::Lime,
+        Self::Green,
+        Self::Teal,
+        Self::Cyan,
+        Self::Blue,
+        Self::Violet,
+        Self::Pink,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Red => "Red",
+            Self::Orange => "Orange",
+            Self::Yellow => "Yellow",
+            Self::Lime => "Lime",
+            Self::Green => "Green",
+            Self::Teal => "Teal",
+            Self::Cyan => "Cyan",
+            Self::Blue => "Blue",
+            Self::Violet => "Violet",
+            Self::Pink => "Pink",
+        }
+    }
+
+    /// The label new layer `id` gets: the colours in turn, so neighbouring
+    /// layers differ. Also the colour shown for layers saved without one.
+    pub fn for_id(id: LayerId) -> Self {
+        Self::ALL[id.0 as usize % Self::ALL.len()]
+    }
+}
+
+/// Reads a label leniently: a label this version does not know (from a
+/// newer Fanimate) becomes no label, rather than failing the whole load.
+fn lenient_label<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Option<Label>, D::Error> {
+    let name = Option::<String>::deserialize(d)?;
+    Ok(name.and_then(|n| Label::ALL.into_iter().find(|l| l.name().eq_ignore_ascii_case(&n))))
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Layer {
     pub id: LayerId,
     pub name: String,
+    /// Label colour. Layers saved before labels existed have none, and are
+    /// shown with [`Label::for_id`].
+    #[serde(
+        default,
+        deserialize_with = "lenient_label",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub label: Option<Label>,
     #[serde(default = "yes", skip_serializing_if = "is_true")]
     pub visible: bool,
     pub opacity: Channel<f32>,
@@ -222,11 +301,17 @@ impl Layer {
         Self {
             id,
             name: name.into(),
+            label: None,
             visible: true,
             opacity: Channel::new(1.0),
             transform: AnimTransform::default(),
             kind,
         }
+    }
+
+    /// The label colour to show: the layer's own, or the one its id picks.
+    pub fn shown_label(&self) -> Label {
+        self.label.unwrap_or_else(|| Label::for_id(self.id))
     }
 
     pub fn with_transform(mut self, transform: AnimTransform) -> Self {
@@ -244,8 +329,14 @@ impl Layer {
         f(&self.transform.scale.keys);
         match &self.kind {
             LayerKind::Vector { shapes } => shapes.iter().for_each(|s| f(&s.path_keys)),
+            LayerKind::Frames { cels } => {
+                f(cels);
+                cels.iter()
+                    .for_each(|c| c.shapes().for_each(|(_, _, s)| f(&s.path_keys)));
+            }
             LayerKind::Bone { skeleton, .. } => skeleton.bones.iter().for_each(|b| f(&b.angle.keys)),
-            LayerKind::Group { .. } => {}
+            LayerKind::Switch { switch, .. } => f(switch),
+            LayerKind::Group { .. } | LayerKind::Image(_) | LayerKind::Audio(_) => {}
         }
     }
 
@@ -257,8 +348,15 @@ impl Layer {
         f(&mut self.transform.scale.keys);
         match &mut self.kind {
             LayerKind::Vector { shapes } => shapes.iter_mut().for_each(|s| f(&mut s.path_keys)),
+            LayerKind::Frames { cels } => {
+                for c in cels.iter_mut() {
+                    c.shapes_mut().for_each(|s| f(&mut s.path_keys));
+                }
+                f(cels);
+            }
             LayerKind::Bone { skeleton, .. } => skeleton.bones.iter_mut().for_each(|b| f(&mut b.angle.keys)),
-            LayerKind::Group { .. } => {}
+            LayerKind::Switch { switch, .. } => f(switch),
+            LayerKind::Group { .. } | LayerKind::Image(_) | LayerKind::Audio(_) => {}
         }
     }
 
@@ -270,6 +368,19 @@ impl Layer {
         frames.dedup();
         frames
     }
+}
+
+/// The child a switch layer shows on `frame`: the one named by the last
+/// key at or before it (names compare without regard to case), or with no
+/// such key, the top child.
+pub fn switch_choice(children: &[Layer], keys: &[crate::anim::Key<String>], frame: f32) -> Option<usize> {
+    let held = keys.partition_point(|k| k.frame as f32 <= frame);
+    let named = held.checked_sub(1).and_then(|i| {
+        children
+            .iter()
+            .position(|c| c.name.eq_ignore_ascii_case(&keys[i].value))
+    });
+    named.or(children.len().checked_sub(1))
 }
 
 /// What a layer contains. Matches Moho's layer types where they overlap.
@@ -285,6 +396,20 @@ pub enum LayerKind {
         skeleton: Skeleton,
         children: Vec<Layer>,
     },
+    /// A picture, which bones can bend.
+    Image(crate::media::Image),
+    /// Frame-by-frame drawings (see [`crate::frames`]).
+    Frames { cels: Vec<crate::frames::Cel> },
+    /// Shows one of its children at a time, chosen by name on keys: mouth
+    /// shapes for lip sync, hands, eyes. With no keys, the top child shows.
+    Switch {
+        children: Vec<Layer>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        switch: Vec<crate::anim::Key<String>>,
+    },
+    /// Sound on the timeline (see [`crate::media`]): a WAV file from the
+    /// media store, starting on `start`.
+    Audio(crate::media::Audio),
 }
 
 impl LayerKind {
@@ -294,15 +419,19 @@ impl LayerKind {
 
     pub fn children(&self) -> Option<&Vec<Layer>> {
         match self {
-            Self::Vector { .. } => None,
-            Self::Group { children } | Self::Bone { children, .. } => Some(children),
+            Self::Vector { .. } | Self::Image(_) | Self::Frames { .. } | Self::Audio(_) => None,
+            Self::Group { children } | Self::Bone { children, .. } | Self::Switch { children, .. } => {
+                Some(children)
+            }
         }
     }
 
     pub fn children_mut(&mut self) -> Option<&mut Vec<Layer>> {
         match self {
-            Self::Vector { .. } => None,
-            Self::Group { children } | Self::Bone { children, .. } => Some(children),
+            Self::Vector { .. } | Self::Image(_) | Self::Frames { .. } | Self::Audio(_) => None,
+            Self::Group { children } | Self::Bone { children, .. } | Self::Switch { children, .. } => {
+                Some(children)
+            }
         }
     }
 }
@@ -347,6 +476,21 @@ mod tests {
         assert!(!doc.insert(Some(a), 0, layer.clone()));
         assert!(doc.insert(Some(g), 99, layer));
         assert_eq!(doc.locate(c), Some((Some(g), 1)));
+    }
+
+    #[test]
+    fn labels_round_trip_and_unknown_ones_are_dropped() {
+        let mut layer = Layer::new(LayerId(3), "a", LayerKind::vector(vec![]));
+        assert_eq!(layer.shown_label(), Label::for_id(LayerId(3)));
+        layer.label = Some(Label::Teal);
+        let json = serde_json::to_string(&layer).unwrap();
+        assert!(json.contains(r#""label":"teal""#));
+        assert_eq!(serde_json::from_str::<Layer>(&json).unwrap(), layer);
+        let newer = json.replace("teal", "ultraviolet");
+        assert_eq!(serde_json::from_str::<Layer>(&newer).unwrap().label, None);
+        let none = serde_json::to_string(&Layer::new(LayerId(1), "b", LayerKind::vector(vec![]))).unwrap();
+        assert!(!none.contains("label"));
+        assert_ne!(Label::for_id(LayerId(1)), Label::for_id(LayerId(2)));
     }
 
     #[test]

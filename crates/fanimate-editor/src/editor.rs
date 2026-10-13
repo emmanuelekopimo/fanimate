@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use fanimate_core::anim::Animatable;
 use fanimate_core::bones::Skeleton;
 use fanimate_core::{
-    Affine2, Channel, Document, Frame, Interpolation, Layer, LayerId, LayerKind, Transform, samples,
+    Affine2, Channel, Document, Frame, Interpolation, Label, Layer, LayerId, LayerKind, Transform, samples,
 };
 use fanimate_fnm::{FnmError, HistoryRecord, Report};
 use serde::{Deserialize, Serialize};
@@ -14,12 +14,20 @@ use serde::{Deserialize, Serialize};
 use crate::action::{Action, Tool};
 use crate::history::History;
 
+mod actions;
+mod bones;
 mod booleans;
 mod construct;
 mod draw;
+mod import;
 mod points;
+mod shapes;
+mod sound;
+mod svg;
+pub use bones::BoneRef;
 pub use draw::DrawStyle;
 pub use points::PointRef;
+pub use sound::{MouthCue, SoundInfo, parse_rhubarb, sound_info};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SelectMode {
@@ -108,6 +116,12 @@ pub struct Editor {
     anchor: Option<LayerId>,
     /// Keys being dragged along the timeline.
     key_drag: Option<KeyDrag>,
+    /// The selected bone, for the bone tools and binding.
+    bone: Option<BoneRef>,
+    /// The bone gesture in progress.
+    bone_drag: Option<bones::BoneDrag>,
+    /// The sub-layer the tools draw on in frame-by-frame layers.
+    pub part: fanimate_core::Part,
 }
 
 /// Retiming keys by dragging them on the timeline. The selected layers are
@@ -145,6 +159,9 @@ impl Editor {
             clipboard: None,
             anchor: None,
             key_drag: None,
+            bone: None,
+            bone_drag: None,
+            part: fanimate_core::Part::default(),
         }
     }
 
@@ -152,7 +169,7 @@ impl Editor {
     pub fn untitled() -> Self {
         let mut doc = Document::new("Untitled", 1280.0, 720.0, 24.0);
         doc.end = 119;
-        let layer = doc.new_layer("Layer 1", LayerKind::vector(vec![]));
+        let layer = labelled(doc.new_layer("Layer 1", LayerKind::vector(vec![])));
         let id = layer.id;
         doc.layers.push(layer);
         let mut ed = Self::new(doc);
@@ -249,6 +266,51 @@ impl Editor {
             Delete if self.tool.edits_points() && !self.points.is_empty() => {
                 self.delete_points();
             }
+            // with a bone tool, Delete deletes the selected bone
+            Delete
+                if self.tool.group() == crate::action::ToolGroup::Bone && self.selected_bone().is_some() =>
+            {
+                self.delete_selected_bone();
+            }
+            BindToBone => {
+                self.bind_to_bone();
+            }
+            NewAction => {
+                self.new_action(false);
+            }
+            NewFramesLayer => self.new_layer(NewKind::Frames),
+            NewSwitchLayer => self.new_layer(NewKind::Switch),
+            SetSwitch(i) => {
+                self.set_switch(i);
+            }
+            NewDrawing => {
+                self.new_drawing(false);
+            }
+            SetPart(p) => {
+                self.part = p;
+                self.points.clear();
+            }
+            NewSmartBoneAction => {
+                self.new_action(true);
+            }
+            EditAction(i) => {
+                self.edit_action(i);
+            }
+            FinishAction => {
+                self.finish_action();
+            }
+            InsertAction(i) => {
+                self.insert_action(i);
+            }
+            DeleteAction(i) => {
+                self.delete_action(i);
+            }
+            BindSmoothly => {
+                self.bind_smoothly();
+            }
+            Unbind => {
+                self.unbind();
+            }
             // Esc ends a Pen path, keeping it, as in Illustrator
             SelectNone | FinishPath if self.is_drawing_path() => self.finish_path(),
             FinishPath => {}
@@ -267,6 +329,7 @@ impl Editor {
             SelectAll => self.select_all(),
             SelectNone => self.selection.clear(),
             Rename => self.rename_request = self.primary(),
+            SetLabel(label) => self.set_label(label),
             NewVectorLayer => self.new_layer(NewKind::Vector),
             NewGroupLayer => self.new_layer(NewKind::Group),
             NewBoneLayer => self.new_layer(NewKind::Bone),
@@ -295,8 +358,9 @@ impl Editor {
                 use crate::action::Tool as T;
                 self.set_tool(if bone { T::AddBone } else { T::AddPoint });
             }
-            New | Open | OpenSample(_) | Save | SaveAs | Quit | Preferences | CommandPalette
-            | LayerProperties | ZoomIn | ZoomOut | FitView | ActualSize => return Outcome::App(action),
+            New | Open | OpenSample(_) | Save | SaveAs | Import | ExportVideo | RenderQueue | LipSync
+            | Quit | ToggleOnionSkin | ToggleLightTable | Preferences | CommandPalette | LayerProperties
+            | ZoomIn | ZoomOut | FitView | ActualSize => return Outcome::App(action),
         }
         Outcome::Done
     }
@@ -315,6 +379,21 @@ impl Editor {
             Cut | Copy | Duplicate | Delete | GroupLayers | MoveLayerUp | MoveLayerDown
             | ToggleVisibility | AddKey | DeleteKey => has_sel,
             Rename | LayerProperties => self.primary().is_some(),
+            SetLabel(_) => has_sel,
+            BindToBone | BindSmoothly | Unbind => self.can_bind(),
+            NewAction => self.actions_layer().is_some(),
+            NewSmartBoneAction => self
+                .actions_layer()
+                .is_some_and(|l| self.selected_bone().is_some_and(|b| b.layer == l)),
+            FinishAction => self.editing_action().is_some(),
+            SetSwitch(_) => self.switch_layer().is_some(),
+            LipSync => self.switch_layer().is_some(),
+            NewDrawing => self.primary().is_some_and(|id| {
+                matches!(self.doc.find(id).map(|l| &l.kind), Some(LayerKind::Frames { .. }))
+            }),
+            EditAction(i) | InsertAction(i) | DeleteAction(i) => self
+                .actions_layer()
+                .is_some_and(|l| i < self.rig_actions(l).len()),
             Paste => self.clipboard.is_some(),
             FinishPath => self.is_drawing_path(),
             Union | Subtract | Intersect => self.can_combine(),
@@ -511,6 +590,14 @@ impl Editor {
         let (word, kind) = match kind {
             NewKind::Vector => ("Layer", LayerKind::vector(vec![])),
             NewKind::Group => ("Group", LayerKind::Group { children: vec![] }),
+            NewKind::Frames => ("Animation", LayerKind::Frames { cels: vec![] }),
+            NewKind::Switch => (
+                "Switch",
+                LayerKind::Switch {
+                    children: vec![],
+                    switch: vec![],
+                },
+            ),
             NewKind::Bone => (
                 "Bones",
                 LayerKind::Bone {
@@ -520,7 +607,7 @@ impl Editor {
             ),
         };
         let name = self.unused_name(word);
-        let layer = self.doc.new_layer(name, kind);
+        let layer = labelled(self.doc.new_layer(name, kind));
         let id = layer.id;
         let (parent, index) = self.insertion_point();
         self.doc.insert(parent, index, layer);
@@ -709,7 +796,7 @@ impl Editor {
             }
         }
         let name = self.unused_name("Group");
-        let group = self.doc.new_layer(name, LayerKind::Group { children });
+        let group = labelled(self.doc.new_layer(name, LayerKind::Group { children }));
         let gid = group.id;
         self.doc.insert(parent, index - removed_below, group);
         self.selection = vec![gid];
@@ -860,6 +947,25 @@ impl Editor {
         }
     }
 
+    /// Give the selected layers a label colour.
+    fn set_label(&mut self, label: Label) {
+        let ids: Vec<LayerId> = self
+            .selection
+            .iter()
+            .copied()
+            .filter(|id| self.doc.find(*id).is_some_and(|l| l.label != Some(label)))
+            .collect();
+        if ids.is_empty() {
+            return;
+        }
+        self.checkpoint("Label colour");
+        for id in ids {
+            if let Some(l) = self.doc.find_mut(id) {
+                l.label = Some(label);
+            }
+        }
+    }
+
     pub fn set_visible(&mut self, id: LayerId, visible: bool) {
         if self.doc.find(id).is_none_or(|l| l.visible == visible) {
             return;
@@ -911,6 +1017,46 @@ impl Editor {
         self.frame = self.doc.start as f32 + t.rem_euclid(n);
     }
 
+    /// The frames onion skins show: up to `before` frames before the current
+    /// one and `after` after it, nearest first. With `keys`, only frames
+    /// with a drawing or key on the selected layers (all layers when none is
+    /// selected), so the previous and next drawings show whatever their
+    /// timing.
+    pub fn onion_frames(&self, before: usize, after: usize, keys: bool) -> (Vec<Frame>, Vec<Frame>) {
+        let now = self.current_frame();
+        let (start, end) = (self.doc.start, self.doc.end);
+        if !keys {
+            let past = (1..=before as Frame)
+                .map(|k| now - k)
+                .filter(|f| *f >= start)
+                .collect();
+            let future = (1..=after as Frame)
+                .map(|k| now + k)
+                .filter(|f| *f <= end)
+                .collect();
+            return (past, future);
+        }
+        let ids: Vec<LayerId> = if self.selection.is_empty() {
+            self.rows(false).into_iter().map(|(id, _)| id).collect()
+        } else {
+            self.selection.clone()
+        };
+        let mut frames: Vec<Frame> = ids.iter().flat_map(|id| self.key_frames(*id)).collect();
+        frames.sort_unstable();
+        frames.dedup();
+        // the drawing or pose held now starts at the last key at or before
+        // the current frame; onion skins are the ones before and after it
+        let held = frames.partition_point(|f| *f <= now);
+        let past = frames[..held.saturating_sub(1)]
+            .iter()
+            .rev()
+            .take(before)
+            .copied()
+            .collect();
+        let future = frames[held..].iter().take(after).copied().collect();
+        (past, future)
+    }
+
     /// Frames with any keyframe on this layer (its transform and opacity,
     /// a bone layer's bones and a vector layer's point keys), sorted.
     pub fn key_frames(&self, id: LayerId) -> Vec<Frame> {
@@ -946,6 +1092,19 @@ impl Editor {
         self.checkpoint("Add keyframe");
         let frame = self.current_frame();
         for id in roots {
+            // on a frame-by-frame layer a key is a drawing: a copy of the
+            // one showing, to change (Animate's F6)
+            if let Some(LayerKind::Frames { cels }) = self.doc.find_mut(id).map(|l| &mut l.kind) {
+                if !cels.iter().any(|c| c.frame == frame) {
+                    let mut cel = fanimate_core::frames::cel_at(cels, frame as f32)
+                        .map(|i| cels[i].clone())
+                        .unwrap_or_default();
+                    cel.frame = frame;
+                    let at = cels.partition_point(|c| c.frame < frame);
+                    cels.insert(at, cel);
+                }
+                continue;
+            }
             if let Some(l) = self.doc.find_mut(id) {
                 key_now(&mut l.transform.position, frame);
                 key_now(&mut l.transform.rotation, frame);
@@ -1124,7 +1283,16 @@ impl Editor {
 enum NewKind {
     Vector,
     Group,
+    Frames,
+    Switch,
     Bone,
+}
+
+/// A new layer with its own label colour, the next in turn, so it is saved
+/// with the project and stays when layers are reordered.
+pub(crate) fn labelled(mut layer: Layer) -> Layer {
+    layer.label = Some(Label::for_id(layer.id));
+    layer
 }
 
 fn plural(n: usize) -> &'static str {
@@ -1343,6 +1511,22 @@ mod tests {
     }
 
     #[test]
+    fn onion_frames_are_neighbours_or_neighbouring_keys() {
+        let (mut ed, [a, ..]) = three();
+        ed.select(a, SelectMode::Replace);
+        for f in [2, 6, 10, 14] {
+            ed.go_to(f);
+            ed.run(Action::AddKey);
+        }
+        ed.go_to(8);
+        assert_eq!(ed.onion_frames(2, 1, false), (vec![7, 6], vec![9]));
+        // held: the key on 6; skins: the keys before it and after now
+        assert_eq!(ed.onion_frames(2, 2, true), (vec![2], vec![10, 14]));
+        ed.go_to(0);
+        assert_eq!(ed.onion_frames(3, 1, false), (vec![], vec![1]));
+    }
+
+    #[test]
     fn dragging_keys_retimes_them_in_one_undo_step() {
         let (mut ed, [a, b, _]) = three();
         ed.select(a, SelectMode::Replace);
@@ -1519,6 +1703,25 @@ mod tests {
         assert_eq!(names(&back), ["A1", "B", "C"]);
         back.run(Action::GoToHistory(0));
         assert_eq!(names(&back), ["A", "B", "C"]);
+    }
+
+    #[test]
+    fn new_layers_get_labels_in_turn_and_labels_can_be_changed() {
+        let (mut ed, [a, ..]) = three();
+        ed.select(a, SelectMode::Replace);
+        ed.run(Action::NewVectorLayer);
+        let first = ed.primary().unwrap();
+        ed.run(Action::NewVectorLayer);
+        let second = ed.primary().unwrap();
+        let label = |ed: &Editor, id| ed.doc.find(id).unwrap().label;
+        assert!(label(&ed, first).is_some());
+        assert_ne!(label(&ed, first), label(&ed, second));
+        ed.select(first, SelectMode::Toggle);
+        ed.run(Action::SetLabel(Label::Blue));
+        assert_eq!(label(&ed, first), Some(Label::Blue));
+        assert_eq!(label(&ed, second), Some(Label::Blue));
+        ed.run(Action::Undo);
+        assert_ne!(label(&ed, second), Some(Label::Blue));
     }
 
     #[test]

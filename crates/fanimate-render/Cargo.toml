@@ -11,6 +11,7 @@ authors.workspace = true
 [dependencies]
 fanimate-core.workspace = true
 bytemuck.workspace = true
+image.workspace = true
 lyon.workspace = true
 log.workspace = true
 pollster.workspace = true

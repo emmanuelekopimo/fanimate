@@ -2,7 +2,7 @@
 //! and stroke of the shapes on the selected layer.
 
 use eframe::egui::{self, RichText};
-use fanimate_core::{LayerKind, Stroke};
+use fanimate_core::Stroke;
 use fanimate_editor::{Action, Tool};
 
 use crate::app::Shell;
@@ -91,6 +91,15 @@ fn new_artwork(ui: &mut egui::Ui, shell: &mut Shell) {
             ui.add(egui::DragValue::new(&mut d.eraser).range(1.0..=1000.0).speed(0.5))
                 .on_hover_text("Eraser size, in canvas pixels");
             ui.end_row();
+
+            ui.label(RichText::new("Weight brush").color(muted));
+            ui.add(
+                egui::DragValue::new(&mut d.weight_brush)
+                    .range(1.0..=2000.0)
+                    .speed(0.5),
+            )
+            .on_hover_text("Paint Weights brush size, in canvas pixels");
+            ui.end_row();
         });
     ui.add_space(4.0);
 }
@@ -101,8 +110,13 @@ fn selected_shapes(ui: &mut egui::Ui, shell: &mut Shell) {
         ui.label(RichText::new("Select a vector layer to edit its colours.").color(muted));
         return;
     };
-    let Some(LayerKind::Vector { shapes }) = shell.editor.doc.find(id).map(|l| l.kind.clone()) else {
-        ui.label(RichText::new("Style applies to vector layers.").color(muted));
+    let Some(shapes) = shell.editor.layer_shapes(id).cloned() else {
+        let text = if shell.editor.is_drawable(id) {
+            "No drawing on this frame yet."
+        } else {
+            "Style applies to vector and frame-by-frame layers."
+        };
+        ui.label(RichText::new(text).color(muted));
         return;
     };
     if shapes.is_empty() {
@@ -168,12 +182,7 @@ fn selected_shapes(ui: &mut egui::Ui, shell: &mut Shell) {
 
     if let Some((i, style, r)) = edited {
         begin_edit(shell, &r, "Change style");
-        if let Some(l) = shell.editor.doc.find_mut(id)
-            && let LayerKind::Vector { shapes } = &mut l.kind
-            && let Some(s) = shapes.get_mut(i)
-        {
-            s.style = style;
-        }
+        shell.editor.set_shape_style(id, i, style);
     }
     end_edits(ui, shell);
 }

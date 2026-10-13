@@ -1,7 +1,7 @@
 //! The Timeline panel: transport controls, a scrubbable ruler, and a row of
 //! keyframes per layer.
 
-use eframe::egui::{self, Id, Rect, RichText, Sense, Shape, Stroke, pos2, vec2};
+use eframe::egui::{self, Id, Rangef, Rect, RichText, Sense, Shape, Stroke, pos2, vec2};
 use fanimate_core::{Frame, Interpolation, LayerId};
 use fanimate_editor::{Action, SelectMode};
 
@@ -15,6 +15,7 @@ const ROW_HEIGHT: f32 = 22.0;
 const DEFAULT_FRAME_WIDTH: f32 = 12.0;
 
 pub fn show(ui: &mut egui::Ui, shell: &mut Shell) {
+    action_banner(ui, shell);
     transport(ui, shell);
     ui.add_space(2.0);
 
@@ -160,6 +161,32 @@ fn row(
     };
     let name = layer.name.clone();
     let visible = layer.visible;
+    // a frame-by-frame layer's drawings, as blocks across their exposure
+    let exposures: Vec<(Frame, Frame)> = match &layer.kind {
+        fanimate_core::LayerKind::Frames { cels } => cels
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                (
+                    c.frame,
+                    cels.get(i + 1).map_or(shell.editor.doc.end + 1, |n| n.frame),
+                )
+            })
+            .collect(),
+        _ => Vec::new(),
+    };
+    // a switch layer names the drawing each key shows
+    let switch_names: Vec<(Frame, String)> = match &layer.kind {
+        fanimate_core::LayerKind::Switch { switch, .. } => {
+            switch.iter().map(|k| (k.frame, k.value.clone())).collect()
+        }
+        _ => Vec::new(),
+    };
+    let sound = match &layer.kind {
+        fanimate_core::LayerKind::Audio(a) => Some((a.media.clone(), a.start, a.volume)),
+        _ => None,
+    };
+    let label = crate::theme::label_color(layer.shown_label());
     let glyphs = key_glyphs(layer);
     let p = shell.palette;
     let selected = shell.editor.is_selected(id);
@@ -171,6 +198,42 @@ fn row(
     let painter = ui.painter_at(rect);
     if selected {
         painter.rect_filled(rect, 0.0, p.accent.gamma_multiply(0.2));
+    }
+    // the layer's label colour: a strip by the name, and a bar across the
+    // frame range, as in compositing apps; keys are drawn on top
+    let strip = Rect::from_min_size(rect.min, vec2(3.0, rect.height()));
+    painter.rect_filled(strip, 0.0, label);
+    let half = (x_of(1.0) - x_of(0.0)) / 2.0;
+    let (start, end) = (shell.editor.doc.start as f32, shell.editor.doc.end as f32);
+    let bar = Rect::from_min_max(
+        pos2(x_of(start) - half, rect.top() + 4.0),
+        pos2(x_of(end) + half, rect.bottom() - 4.0),
+    );
+    let keys_painter = ui.painter_at(keys.intersect(keys_clip));
+    keys_painter.rect_filled(bar, 2.0, label.gamma_multiply(0.3));
+    for (i, (from, to)) in exposures.iter().enumerate() {
+        let block = Rect::from_min_max(
+            pos2(x_of(*from as f32) - half + 1.0, rect.top() + 3.0),
+            pos2(x_of(*to as f32) - half - 1.0, rect.bottom() - 3.0),
+        );
+        let shade = if i % 2 == 0 { 0.55 } else { 0.4 };
+        keys_painter.rect_filled(block, 2.0, label.gamma_multiply(shade));
+    }
+    if let Some((media, from, volume)) = sound
+        && let Some(peaks) = shell.audio.peaks(&shell.editor.doc, &media)
+    {
+        // only the frames in view, one line each
+        let clip = keys.intersect(keys_clip);
+        let first = (frame_at(clip.left()) - from - 1).max(0) as usize;
+        let last = ((frame_at(clip.right()) - from + 1).max(0) as usize).min(peaks.len());
+        let mid = rect.center().y;
+        let reach = (ROW_HEIGHT / 2.0 - 3.0) * volume.min(1.0);
+        let width = (2.0 * half - 1.0).clamp(1.0, 3.0);
+        for (i, (lo, hi)) in peaks.iter().enumerate().take(last).skip(first) {
+            let x = x_of((from + i as Frame) as f32);
+            let span = Rangef::new(mid - hi * reach, mid - lo * reach + 1.0);
+            keys_painter.vline(x, span, Stroke::new(width, p.text.gamma_multiply(0.7)));
+        }
     }
     painter.hline(
         rect.x_range(),
@@ -235,6 +298,16 @@ fn row(
         }
     }
 
+    for (f, name) in &switch_names {
+        key_painter.text(
+            pos2(x_of(*f as f32) + 7.0, keys.center().y),
+            egui::Align2::LEFT_CENTER,
+            name,
+            egui::FontId::proportional(10.0),
+            p.text,
+        );
+    }
+
     // key area: click to select the layer and jump to that frame; drag a
     // key to retime it (with the keys of the other selected layers on that
     // frame), or drag elsewhere to scrub; right-click for the key menu
@@ -290,6 +363,7 @@ fn row(
         menus::item(ui, shell, Action::AddKey);
         menus::item(ui, shell, Action::DeleteKey);
         menus::interpolation_items(ui, shell);
+        menus::switch_items(ui, shell);
         ui.separator();
         menus::item(ui, shell, Action::PrevKey);
         menus::item(ui, shell, Action::NextKey);
@@ -320,6 +394,34 @@ fn key_glyphs(layer: &fanimate_core::Layer) -> Vec<(Frame, Option<Interpolation>
 
 /// How close, in points, the pointer must be to a key to drag it.
 const KEY_GRAB_PX: f32 = 6.0;
+
+/// While an action is open, say so above the timeline: its keys are being
+/// edited, not the main timeline's.
+fn action_banner(ui: &mut egui::Ui, shell: &mut Shell) {
+    let Some((layer, index)) = shell.editor.editing_action() else {
+        return;
+    };
+    let Some(act) = shell.editor.rig_actions(layer).get(index) else {
+        return;
+    };
+    let p = shell.palette;
+    let text = format!(
+        "Editing action \"{}\" (frames 0 to {}). Changes go into the action, not the timeline.",
+        act.name, act.length
+    );
+    egui::Frame::NONE
+        .fill(p.accent.gamma_multiply(0.25))
+        .inner_margin(egui::Margin::symmetric(8, 3))
+        .corner_radius(3.0)
+        .show(ui, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(text).size(12.0).color(p.text));
+                if ui.button("Finish editing").clicked() {
+                    shell.pending.push(Action::FinishAction);
+                }
+            });
+        });
+}
 
 fn transport(ui: &mut egui::Ui, shell: &mut Shell) {
     ui.horizontal(|ui| {
@@ -379,6 +481,41 @@ fn transport(ui: &mut egui::Ui, shell: &mut Shell) {
             {
                 shell.pending.push(action);
             }
+        }
+        ui.separator();
+        // onion skin: the toggle, and its settings on right-click
+        let onion = icons::button(ui, Icon::OnionSkin, 24.0, shell.onion.on, false).on_hover_text(format!(
+            "{}. Right-click for settings.",
+            tip(shell, Action::ToggleOnionSkin)
+        ));
+        if onion.clicked() {
+            shell.pending.push(Action::ToggleOnionSkin);
+        }
+        menus::context_menu(&onion, |ui| {
+            let o = &mut shell.onion;
+            ui.checkbox(&mut o.on, "Show onion skin");
+            ui.horizontal(|ui| {
+                ui.label("Before");
+                ui.add(egui::DragValue::new(&mut o.before).range(0..=10));
+                ui.label("After");
+                ui.add(egui::DragValue::new(&mut o.after).range(0..=10));
+            });
+            ui.checkbox(&mut o.keys, "Drawings and keys only")
+                .on_hover_text("Show the previous and next drawings, however long they are held");
+            ui.checkbox(&mut o.all_layers, "All layers")
+                .on_hover_text("Otherwise only the selected layers");
+        });
+        if icons::button(ui, Icon::LightTable, 24.0, shell.light_table, false)
+            .on_hover_text(tip(shell, Action::ToggleLightTable))
+            .clicked()
+        {
+            shell.pending.push(Action::ToggleLightTable);
+        }
+        if icons::button(ui, Icon::XSheet, 24.0, false, false)
+            .on_hover_text("X-Sheet: the same timing, frames down the page")
+            .clicked()
+        {
+            shell.ui.open_tab = Some(crate::panels::Tab::XSheet);
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(

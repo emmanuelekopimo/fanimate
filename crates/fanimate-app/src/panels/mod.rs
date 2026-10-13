@@ -1,5 +1,6 @@
 //! The dockable panels and the status bar.
 
+mod actions;
 pub mod canvas;
 mod history;
 mod layers;
@@ -7,6 +8,7 @@ mod properties;
 mod style;
 mod timeline;
 mod tools;
+mod xsheet;
 
 use std::time::{Duration, Instant};
 
@@ -29,10 +31,11 @@ pub enum Tab {
     Style,
     Actions,
     History,
+    XSheet,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 8] = [
+    pub const ALL: [Tab; 9] = [
         Self::Canvas,
         Self::Tools,
         Self::Layers,
@@ -41,6 +44,7 @@ impl Tab {
         Self::Style,
         Self::Actions,
         Self::History,
+        Self::XSheet,
     ];
 
     pub fn title(self) -> &'static str {
@@ -53,6 +57,7 @@ impl Tab {
             Self::Style => "Style",
             Self::Actions => "Actions",
             Self::History => "History",
+            Self::XSheet => "X-Sheet",
         }
     }
 }
@@ -82,17 +87,8 @@ impl egui_dock::TabViewer for TabViewer<'_> {
             Tab::Properties => properties::show(ui, shell),
             Tab::Style => style::show(ui, shell),
             Tab::History => history::show(ui, shell),
-            Tab::Actions => {
-                ui.add_space(8.0);
-                ui.label(RichText::new("Actions and Smart Bones").strong());
-                ui.label(
-                    RichText::new(
-                        "Smart Bone actions, morphs and on-canvas controls arrive in milestone M3, \
-                         with the rigging system.",
-                    )
-                    .color(shell.palette.text_muted),
-                );
-            }
+            Tab::XSheet => xsheet::show(ui, shell),
+            Tab::Actions => actions::show(ui, shell),
         }
     }
 
@@ -102,7 +98,7 @@ impl egui_dock::TabViewer for TabViewer<'_> {
 
     fn scroll_bars(&self, tab: &Tab) -> [bool; 2] {
         match tab {
-            Tab::Canvas | Tab::Timeline | Tab::Layers | Tab::History => [false, false],
+            Tab::Canvas | Tab::Timeline | Tab::Layers | Tab::History | Tab::XSheet => [false, false],
             _ => [false, true],
         }
     }
@@ -136,7 +132,7 @@ pub fn status_bar(ui: &mut egui::Ui, shell: &mut Shell) {
         )
         .show(ui, |ui| {
             ui.horizontal_centered(|ui| {
-                let (text, color) = match &shell.editor.status {
+                let (text, color): (String, egui::Color32) = match &shell.editor.status {
                     Some((StatusKind::Error, m)) => (m.clone(), p.error),
                     Some((StatusKind::Warning, m)) => (m.clone(), p.keyframe),
                     Some((StatusKind::Success, m)) => (m.clone(), p.success),
@@ -146,7 +142,9 @@ pub fn status_bar(ui: &mut egui::Ui, shell: &mut Shell) {
                         p.text_muted,
                     ),
                 };
-                ui.label(RichText::new(text).size(12.0).color(color));
+                let hover = text.clone();
+                // state on the right first, so a long message is cut short
+                // with an ellipsis instead of running under it
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let muted = |s: String| RichText::new(s).size(12.0).color(p.text_muted);
                     ui.label(muted(shell.gpu_name.clone()));
@@ -168,12 +166,32 @@ pub fn status_bar(ui: &mut egui::Ui, shell: &mut Shell) {
                         shell.view.zoom * ui.ctx().pixels_per_point() * 100.0
                     )));
                     ui.separator();
+                    if let Some((name, fraction)) = shell.renders.active.clone() {
+                        let bar = egui::ProgressBar::new(fraction)
+                            .desired_width(70.0)
+                            .desired_height(6.0)
+                            .fill(p.accent);
+                        let r = ui
+                            .add(bar)
+                            .on_hover_text(format!("Rendering {name}. Click to see the render queue."))
+                            .interact(egui::Sense::click());
+                        if r.clicked() {
+                            shell.pending.push(fanimate_editor::Action::RenderQueue);
+                        }
+                        ui.label(muted(format!("Rendering {:.0}%", fraction * 100.0)));
+                        ui.separator();
+                    }
                     let doc = &shell.editor.doc;
                     ui.label(muted(format!(
                         "Frame {} of {}",
                         shell.editor.current_frame(),
                         doc.end
                     )));
+                    ui.separator();
+                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                        ui.add(egui::Label::new(RichText::new(text).size(12.0).color(color)).truncate())
+                            .on_hover_text(&hover);
+                    });
                 });
             });
         });

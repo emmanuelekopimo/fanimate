@@ -29,6 +29,8 @@ pub struct DrawStyle {
     pub taper: f32,
     /// Eraser diameter, in document units.
     pub eraser: f32,
+    /// Weight brush diameter, in document units.
+    pub weight_brush: f32,
 }
 
 impl Default for DrawStyle {
@@ -41,6 +43,7 @@ impl Default for DrawStyle {
             smoothing: 0.5,
             taper: 20.0,
             eraser: 20.0,
+            weight_brush: 40.0,
         }
     }
 }
@@ -83,7 +86,7 @@ impl Editor {
                 self.set_status(StatusKind::Warning, msg);
                 Err(())
             }
-            Some(layer) if matches!(layer.kind, LayerKind::Vector { .. }) => {
+            Some(layer) if matches!(layer.kind, LayerKind::Vector { .. } | LayerKind::Frames { .. }) => {
                 // a layer scaled to nothing has no space to draw in
                 if self.world(layer.id).inverse().is_finite() {
                     Ok(Some(layer.id))
@@ -179,7 +182,7 @@ impl Editor {
         };
         let (id, from, zoom) = (erase.layer, erase.last, erase.zoom);
         let inv = self.world(id).inverse();
-        let Some(LayerKind::Vector { shapes }) = self.doc.find(id).map(|l| &l.kind) else {
+        let Some(shapes) = self.layer_shapes(id) else {
             return;
         };
         // erase in the layer's own space, where its shapes are
@@ -207,7 +210,7 @@ impl Editor {
                 erase.recorded = true;
             }
         }
-        if let Some(LayerKind::Vector { shapes }) = self.doc.find_mut(id).map(|l| &mut l.kind) {
+        if let Some(shapes) = self.layer_shapes_mut(id) {
             // back to front, so earlier indices stay valid
             for (i, left) in changes.into_iter().rev() {
                 shapes.splice(i..=i, left);
@@ -308,9 +311,7 @@ impl Editor {
             None => self.new_drawing_layer(),
         };
         shape.transform(self.world(id).inverse());
-        if let Some(layer) = self.doc.find_mut(id)
-            && let LayerKind::Vector { shapes } = &mut layer.kind
-        {
+        if let Some(shapes) = self.drawing_shapes_mut(id) {
             let prefix = format!("{} ", shape.name);
             let n = shapes.iter().filter(|s| s.name.starts_with(&prefix)).count() + 1;
             shape.name = format!("{prefix}{n}");
@@ -323,7 +324,7 @@ impl Editor {
     /// A new, empty vector layer for drawing on, selected.
     fn new_drawing_layer(&mut self) -> LayerId {
         let name = self.unused_name("Layer");
-        let layer = self.doc.new_layer(name, LayerKind::vector(vec![]));
+        let layer = super::labelled(self.doc.new_layer(name, LayerKind::vector(vec![])));
         let id = layer.id;
         let (parent, index) = match self.primary().and_then(|p| self.doc.find(p)) {
             Some(p) if p.kind.children().is_some() => (Some(p.id), p.kind.children().map_or(0, Vec::len)),
@@ -338,25 +339,39 @@ impl Editor {
     /// The topmost visible shape under `p` (document space), within
     /// `tolerance` document units: its layer and index in that layer.
     pub fn shape_at(&self, p: Vec2, tolerance: f32) -> Option<(LayerId, usize)> {
+        self.hit(p, tolerance, false)
+    }
+
+    /// Like [`shape_at`](Self::shape_at), among the shapes the tools edit
+    /// (see [`Editor::layer_shapes`]).
+    fn editable_shape_at(&self, p: Vec2, tolerance: f32) -> Option<(LayerId, usize)> {
+        self.hit(p, tolerance, true)
+    }
+
+    fn hit(&self, p: Vec2, tolerance: f32, editable: bool) -> Option<(LayerId, usize)> {
         let items = evaluate(&self.doc, self.frame);
-        items.iter().rev().find_map(|item| {
-            let inv = item.transform.inverse();
-            if !inv.is_finite() {
-                return None;
-            }
-            let local_tolerance = tolerance * inv.matrix2.determinant().abs().sqrt();
-            if !item.shape.contains(inv.transform_point2(p), local_tolerance) {
-                return None;
-            }
-            Some((item.layer, item.index))
-        })
+        items
+            .iter()
+            .rev()
+            .filter(|i| !editable || self.editable(i))
+            .find_map(|item| {
+                let inv = item.transform.inverse();
+                if !inv.is_finite() {
+                    return None;
+                }
+                let local_tolerance = tolerance * inv.matrix2.determinant().abs().sqrt();
+                if !item.shape.contains(inv.transform_point2(p), local_tolerance) {
+                    return None;
+                }
+                Some((item.layer, item.index))
+            })
     }
 
     /// Paint Bucket: fill the shape under `p` with the fill colour, or, for
     /// a brush stroke, recolour it with the line colour. One undo step.
     /// Returns whether anything changed.
     pub fn paint_at(&mut self, p: Vec2, tolerance: f32) -> bool {
-        let Some((id, index)) = self.shape_at(p, tolerance) else {
+        let Some((id, index)) = self.editable_shape_at(p, tolerance) else {
             return false;
         };
         let Some(shape) = self.shape(id, index) else {
@@ -392,7 +407,7 @@ impl Editor {
     /// Eyedropper: take the colours of the shape under `p` for new artwork.
     /// Not an undo step: it changes no artwork.
     pub fn pick_style_at(&mut self, p: Vec2, tolerance: f32) -> bool {
-        let Some((id, index)) = self.shape_at(p, tolerance) else {
+        let Some((id, index)) = self.editable_shape_at(p, tolerance) else {
             return false;
         };
         let Some(shape) = self.shape(id, index) else {
@@ -410,17 +425,11 @@ impl Editor {
     }
 
     fn shape(&self, id: LayerId, index: usize) -> Option<&Shape> {
-        match &self.doc.find(id)?.kind {
-            LayerKind::Vector { shapes } => shapes.get(index),
-            _ => None,
-        }
+        self.layer_shapes(id)?.get(index)
     }
 
     fn shape_mut(&mut self, id: LayerId, index: usize) -> Option<&mut Shape> {
-        match &mut self.doc.find_mut(id)?.kind {
-            LayerKind::Vector { shapes } => shapes.get_mut(index),
-            _ => None,
-        }
+        self.layer_shapes_mut(id)?.get_mut(index)
     }
 
     /// Whether a layer and all its ancestors are visible.

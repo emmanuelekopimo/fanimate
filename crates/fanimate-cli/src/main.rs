@@ -14,6 +14,8 @@ usage:
   fanimate-cli sample <hello|benchmark> <out.fnm> [--bones N]
   fanimate-cli validate <project.fnm> [--repair]
   fanimate-cli render <project.fnm> -o <out.png> [--frame N] [--width W] [--height H]
+  fanimate-cli export <project.fnm> -o <out.mp4|.mkv|.gif|.png> [--width W] [--height H]
+                      [--start N] [--end N]
   fanimate-cli bench [--bones N] [--frames N] [--gpu [--width W] [--height H]]";
 
 fn main() -> ExitCode {
@@ -23,6 +25,7 @@ fn main() -> ExitCode {
         Some("sample") => sample(&args[1..]),
         Some("validate") => validate(&args[1..]),
         Some("render") => render(&args[1..]),
+        Some("export") => export(&args[1..]),
         Some("bench") => bench(&args[1..]),
         Some("-V" | "--version") => {
             println!("fanimate-cli {}", env!("CARGO_PKG_VERSION"));
@@ -162,6 +165,55 @@ fn render(args: &[String]) -> CmdResult {
     Ok(ExitCode::SUCCESS)
 }
 
+/// Export frames as video (through FFmpeg), an animated GIF or a PNG
+/// sequence, chosen by the output's extension. The same code as the app's
+/// render queue.
+fn export(args: &[String]) -> CmdResult {
+    use fanimate_export::{Format, Settings};
+    let a = Args::parse(args, &["-o", "--width", "--height", "--start", "--end"])?;
+    let [path] = a.positional.as_slice() else {
+        return Err(USAGE.into());
+    };
+    let out: PathBuf = a.get::<String>("-o")?.ok_or("export needs -o <out>")?.into();
+    let ext = out
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let format = Format::ALL
+        .into_iter()
+        .find(|f| f.extension() == ext)
+        .ok_or("the output must end in .mp4, .mkv, .gif or .png")?;
+    let (doc, report) = fanimate_fnm::load(path).map_err(|e| e.to_string())?;
+    if !report.is_clean() {
+        eprint!("{report}");
+    }
+    let (width, height) = output_size(&doc, a.get("--width")?, a.get("--height")?);
+    let settings = Settings {
+        format,
+        width,
+        height,
+        start: a.get("--start")?.unwrap_or(doc.start),
+        end: a.get("--end")?.unwrap_or(doc.end),
+    };
+    let started = Instant::now();
+    let mut last = Instant::now();
+    fanimate_export::export(&doc, &settings, &out, &mut |done, total| {
+        if last.elapsed() > Duration::from_secs(1) {
+            eprintln!("frame {done} of {total}");
+            last = Instant::now();
+        }
+        true
+    })
+    .map_err(|e| e.to_string())?;
+    println!(
+        "exported {} frames to {} in {:.1} s",
+        settings.sanitized().frame_count(),
+        out.display(),
+        started.elapsed().as_secs_f64()
+    );
+    Ok(ExitCode::SUCCESS)
+}
+
 /// Document size by default; one dimension given scales the other to match.
 fn output_size(doc: &Document, w: Option<u32>, h: Option<u32>) -> (u32, u32) {
     let aspect = doc.width / doc.height;
@@ -193,8 +245,7 @@ fn bench(args: &[String]) -> CmdResult {
         let t0 = Instant::now();
         evaluator.evaluate_into(&doc, frame, &mut items);
         let t1 = Instant::now();
-        mesh.vertices.clear();
-        mesh.indices.clear();
+        tess.clear(&mut mesh);
         tess.canvas(&doc, &mut mesh);
         tess.draw_items(&items, &mut mesh);
         let t2 = Instant::now();

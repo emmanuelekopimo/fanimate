@@ -41,6 +41,15 @@ pub enum Icon {
     Subtract,
     Intersect,
     History,
+    Action,
+    ImageLayer,
+    FramesLayer,
+    OnionSkin,
+    LightTable,
+    XSheet,
+    SwitchLayer,
+    AudioLayer,
+    Grip,
 }
 
 macro_rules! lucide {
@@ -73,6 +82,7 @@ impl Icon {
                 Tool::SelectBone => own!("bone-select"),
                 Tool::AddBone => own!("bone-plus"),
                 Tool::ManipulateBones => own!("bone-rotate"),
+                Tool::PaintWeights => lucide!("brush"),
                 Tool::Pan => lucide!("hand"),
                 Tool::Zoom => lucide!("zoom-in"),
             },
@@ -101,6 +111,15 @@ impl Icon {
             Self::Subtract => lucide!("squares-subtract"),
             Self::Intersect => lucide!("squares-intersect"),
             Self::History => lucide!("history"),
+            Self::Action => lucide!("clapperboard"),
+            Self::ImageLayer => lucide!("image"),
+            Self::FramesLayer => lucide!("film"),
+            Self::OnionSkin => lucide!("layers-2"),
+            Self::LightTable => lucide!("lamp"),
+            Self::XSheet => lucide!("table-2"),
+            Self::SwitchLayer => lucide!("toggle-left"),
+            Self::AudioLayer => lucide!("audio-lines"),
+            Self::Grip => lucide!("grip-vertical"),
         }
     }
 }
@@ -237,6 +256,15 @@ mod tests {
             Icon::Subtract,
             Icon::Intersect,
             Icon::History,
+            Icon::Action,
+            Icon::ImageLayer,
+            Icon::FramesLayer,
+            Icon::OnionSkin,
+            Icon::LightTable,
+            Icon::XSheet,
+            Icon::SwitchLayer,
+            Icon::AudioLayer,
+            Icon::Grip,
         ]);
         icons
     }

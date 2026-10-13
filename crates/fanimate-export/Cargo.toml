@@ -1,0 +1,23 @@
+[package]
+name = "fanimate-export"
+description = "Fanimate export: rendering a project to video, GIF or PNG frames, and the render queue."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+fanimate-core.workspace = true
+fanimate-fnm.workspace = true
+fanimate-render.workspace = true
+hound.workspace = true
+image = { workspace = true, features = ["gif"] }
+log.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

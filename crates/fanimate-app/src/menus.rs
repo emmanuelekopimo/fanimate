@@ -59,6 +59,10 @@ pub fn item_checked(ui: &mut egui::Ui, shell: &mut Shell, action: Action, checke
             .map_or("Redo".to_owned(), |l| format!("Redo {l}")),
         // the submenu already says "Open Sample"
         Action::OpenSample(sample) => sample.name().to_owned(),
+        // a switch menu lists the layers to show by name
+        Action::SetSwitch(i) => switch_children(shell)
+            .and_then(|c| c.into_iter().nth(i))
+            .unwrap_or_else(|| action.label().to_owned()),
         a => a.label().to_owned(),
     };
     // the gap applies on both sides of the stretch before the shortcut, so
@@ -89,6 +93,9 @@ pub fn file(ui: &mut egui::Ui, shell: &mut Shell) {
     });
     ui.separator();
     items(ui, shell, &[Action::Save, Action::SaveAs]);
+    ui.separator();
+    item(ui, shell, Action::Import);
+    items(ui, shell, &[Action::ExportVideo, Action::RenderQueue]);
     ui.separator();
     item(ui, shell, Action::Quit);
 }
@@ -150,7 +157,9 @@ pub fn layer(ui: &mut egui::Ui, shell: &mut Shell) {
         shell,
         &[
             Action::NewVectorLayer,
+            Action::NewFramesLayer,
             Action::NewGroupLayer,
+            Action::NewSwitchLayer,
             Action::NewBoneLayer,
         ],
     );
@@ -166,6 +175,14 @@ pub fn layer(ui: &mut egui::Ui, shell: &mut Shell) {
             Action::MoveLayerUp,
             Action::MoveLayerDown,
         ],
+    );
+    label_menu(ui, shell);
+    switch_items(ui, shell);
+    ui.separator();
+    items(
+        ui,
+        shell,
+        &[Action::BindToBone, Action::BindSmoothly, Action::Unbind],
     );
     ui.separator();
     item(ui, shell, Action::LayerProperties);
@@ -186,11 +203,55 @@ pub fn animation(ui: &mut egui::Ui, shell: &mut Shell) {
         ],
     );
     ui.separator();
-    items(ui, shell, &[Action::AddKey, Action::DeleteKey]);
+    items(
+        ui,
+        shell,
+        &[Action::AddKey, Action::DeleteKey, Action::NewDrawing],
+    );
     interpolation_items(ui, shell);
+    ui.separator();
+    items(
+        ui,
+        shell,
+        &[
+            Action::NewAction,
+            Action::NewSmartBoneAction,
+            Action::FinishAction,
+        ],
+    );
 }
 
 /// The interpolation of the keys on the current frame, one item each.
+/// The names of the selected switch layer's children, bottom first.
+fn switch_children(shell: &Shell) -> Option<Vec<String>> {
+    let id = shell.editor.switch_layer()?;
+    let children = shell.editor.doc.find(id)?.kind.children()?;
+    Some(children.iter().map(|c| c.name.clone()).collect())
+}
+
+/// "Show" items for each layer of the selected switch layer, top of the
+/// stack first, the one shown on the current frame checked.
+pub fn switch_items(ui: &mut egui::Ui, shell: &mut Shell) {
+    let Some(id) = shell.editor.switch_layer() else {
+        return;
+    };
+    let Some(fanimate_core::LayerKind::Switch { children, switch }) =
+        shell.editor.doc.find(id).map(|l| &l.kind)
+    else {
+        return;
+    };
+    let count = children.len();
+    let shown = fanimate_core::scene::switch_choice(children, switch, shell.editor.current_frame() as f32);
+    ui.separator();
+    ui.menu_button("Show Layer", |ui| {
+        ui.set_min_width(MENU_MIN_WIDTH);
+        for i in (0..count).rev() {
+            item_checked(ui, shell, Action::SetSwitch(i), shown == Some(i));
+        }
+    });
+    item(ui, shell, Action::LipSync);
+}
+
 pub fn interpolation_items(ui: &mut egui::Ui, shell: &mut Shell) {
     ui.separator();
     let current = shell.editor.key_interpolation().flatten();
@@ -215,6 +276,11 @@ pub fn view(ui: &mut egui::Ui, shell: &mut Shell) {
             Action::ActualSize,
         ],
     );
+    ui.separator();
+    let onion = shell.onion.on;
+    item_checked(ui, shell, Action::ToggleOnionSkin, onion);
+    let light = shell.light_table;
+    item_checked(ui, shell, Action::ToggleLightTable, light);
     ui.separator();
     ui.menu_button("Theme", |ui| {
         for theme in Theme::ALL {
@@ -266,6 +332,36 @@ pub fn help(ui: &mut egui::Ui, shell: &mut Shell) {
     }
 }
 
+/// Label colours for the selected layers, each with its swatch.
+pub fn label_menu(ui: &mut egui::Ui, shell: &mut Shell) {
+    let enabled = shell.editor.can_run(Action::SetLabel(fanimate_core::Label::Red));
+    ui.add_enabled_ui(enabled, |ui| {
+        ui.menu_button("Label Colour", |ui| {
+            ui.set_min_width(MENU_MIN_WIDTH);
+            let current = shell
+                .editor
+                .primary()
+                .and_then(|id| shell.editor.doc.find(id))
+                .map(|l| l.shown_label());
+            for label in fanimate_core::Label::ALL {
+                let button = egui::Button::new(label.name()).selected(current == Some(label));
+                let response = ui.add(button);
+                let r = response.rect;
+                let square = egui::Rect::from_center_size(
+                    egui::pos2(r.right() - 14.0, r.center().y),
+                    egui::vec2(10.0, 10.0),
+                );
+                ui.painter()
+                    .rect_filled(square, 2.0, crate::theme::label_color(label));
+                if response.clicked() {
+                    shell.pending.push(Action::SetLabel(label));
+                    ui.close();
+                }
+            }
+        });
+    });
+}
+
 /// Right-click menu contents for layers (Layers panel rows and the canvas).
 pub fn layer_context(ui: &mut egui::Ui, shell: &mut Shell) {
     ui.menu_button("New", |ui| {
@@ -276,6 +372,8 @@ pub fn layer_context(ui: &mut egui::Ui, shell: &mut Shell) {
                 Action::NewVectorLayer,
                 Action::NewGroupLayer,
                 Action::NewBoneLayer,
+                Action::NewFramesLayer,
+                Action::NewSwitchLayer,
             ],
         );
     });
@@ -304,6 +402,16 @@ pub fn layer_context(ui: &mut egui::Ui, shell: &mut Shell) {
             Action::MoveLayerDown,
         ],
     );
+    label_menu(ui, shell);
+    switch_items(ui, shell);
+    ui.menu_button("Bones", |ui| {
+        ui.set_min_width(MENU_MIN_WIDTH);
+        items(
+            ui,
+            shell,
+            &[Action::BindToBone, Action::BindSmoothly, Action::Unbind],
+        );
+    });
     ui.separator();
     items(ui, shell, &[Action::AddKey, Action::DeleteKey]);
     ui.separator();

@@ -37,7 +37,7 @@ Questions for counsel:
 
 - Confirm the dual MIT / Apache 2.0 licence suits the business model (free app; paid cloud rendering, AI credits, hosting and marketplace).
 - Review third-party licences: Rust crates, the Inter font (OFL 1.1), Rhubarb Lip Sync (MIT), future AI models and their training-data terms.
-- Video codecs: licensing for H.264, H.265, AV1 and ProRes encoding and decoding in a free app. (Phase 1 plans MP4/H.264, WebM, GIF and PNG only; see the Phase 1 plan, section 2.2.)
+- Video codecs: licensing for H.264, H.265, AV1 and ProRes encoding and decoding in a free app. M4 ships MP4 and MKV with H.264 through a bundled GPL FFmpeg run as a separate program, plus GIF and PNG. [video-export.md](video-export.md) sets out the approach, how the release meets the GPL's duties, and the patent question; counsel should confirm the separate-program reading and decide on the H.264 patent pool before 1.0.
 - Whether a contributor licence agreement or developer certificate of origin is needed, given the inbound-equals-outbound clause in the README.
 
 ## 5. Brand

@@ -106,6 +106,8 @@ fn doc_meta(doc: &Document) -> Document {
         background: doc.background,
         layers: Vec::new(),
         next_layer_id: doc.next_layer_id,
+        action_edit: doc.action_edit.clone(),
+        media: doc.media.clone(),
     }
 }
 

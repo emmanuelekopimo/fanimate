@@ -86,6 +86,8 @@ pub fn repair(doc: &mut Document) -> Report {
 struct Checker {
     repair: bool,
     report: Report,
+    /// Names of the pictures the document holds.
+    media: std::collections::BTreeSet<String>,
 }
 
 impl Checker {
@@ -93,6 +95,7 @@ impl Checker {
         Self {
             repair,
             report: Report::default(),
+            media: Default::default(),
         }
     }
 
@@ -106,6 +109,7 @@ impl Checker {
     }
 
     fn run(mut self, doc: &mut Document) -> Report {
+        self.media = doc.media.keys().cloned().collect();
         self.document(doc);
         self.layer_ids(doc);
         let end = doc.end;
@@ -235,40 +239,53 @@ impl Checker {
         match &mut layer.kind {
             LayerKind::Vector { shapes } => {
                 for (i, shape) in shapes.iter_mut().enumerate() {
-                    let problem = match (shape.bone, bones) {
-                        (None, _) => None,
-                        (Some(_), None) => {
-                            Some("is bound to a bone but is not inside a bone layer".to_owned())
-                        }
-                        (Some(b), Some(n)) if b >= n => {
-                            Some(format!("is bound to bone {b}, but the skeleton has {n}"))
-                        }
-                        (Some(_), Some(_)) => None,
-                    };
-                    if let Some(p) = problem {
-                        let sloc = format!("{loc} > shape {i} \"{}\"", shape.name);
-                        self.issue(
-                            Severity::Warning,
-                            &sloc,
-                            format!("{p}; it will not move with the rig"),
-                            true,
-                        );
-                        if self.repair {
-                            shape.bone = None;
-                        }
-                    }
-                    if shape.path.points().any(|p| !p.is_finite()) {
-                        let sloc = format!("{loc} > shape {i} \"{}\"", shape.name);
-                        self.issue(Severity::Error, &sloc, "path has non-finite points".into(), false);
-                    }
                     let sloc = format!("{loc} > shape {i} \"{}\"", shape.name);
-                    self.widths(shape, &sloc);
-                    self.path_keys(shape, &sloc, end);
+                    self.shape(shape, &sloc, end, bones);
                 }
+            }
+            LayerKind::Frames { cels } => {
+                let mut cels_keys = std::mem::take(cels);
+                self.cels(&mut cels_keys, &loc);
+                for cel in &mut cels_keys {
+                    let at = cel.frame;
+                    for part in fanimate_core::Part::ALL {
+                        for (i, shape) in cel.part_mut(part).iter_mut().enumerate() {
+                            let sloc = format!(
+                                "{loc} > drawing on frame {} > {} shape {i} \"{}\"",
+                                at,
+                                part.label(),
+                                shape.name
+                            );
+                            self.shape(shape, &sloc, end, bones);
+                        }
+                    }
+                }
+                *cels = cels_keys;
             }
             LayerKind::Group { children } => {
                 for child in children {
                     self.layer(child, end, bones);
+                }
+            }
+            LayerKind::Image(img) => self.image(img, &loc, bones),
+            LayerKind::Switch { children, switch } => {
+                self.keys(switch, |_| true, &format!("{loc} > switch keys"), end);
+                for child in children {
+                    self.layer(child, end, bones);
+                }
+            }
+            LayerKind::Audio(audio) => {
+                self.media_file(&audio.media, &loc, "sound");
+                if !(audio.volume.is_finite() && audio.volume >= 0.0) {
+                    self.issue(
+                        Severity::Error,
+                        &loc,
+                        format!("volume {} is not valid", audio.volume),
+                        true,
+                    );
+                    if self.repair {
+                        audio.volume = 1.0;
+                    }
                 }
             }
             LayerKind::Bone { skeleton, children } => {
@@ -302,11 +319,47 @@ impl Checker {
                             }
                         }
                     }
+                    if bone
+                        .limits
+                        .is_some_and(|[lo, hi]| !(lo.is_finite() && hi.is_finite() && lo <= hi))
+                    {
+                        self.issue(
+                            Severity::Error,
+                            &bloc,
+                            "angle limits are not a valid range; they are removed".into(),
+                            true,
+                        );
+                        if self.repair {
+                            bone.limits = None;
+                        }
+                    }
+                    if bone.strength.is_some_and(|s| !(s.is_finite() && s > 0.0)) {
+                        self.issue(
+                            Severity::Warning,
+                            &bloc,
+                            "strength is not a positive number; the default is used".into(),
+                            true,
+                        );
+                        if self.repair {
+                            bone.strength = None;
+                        }
+                    }
+                    let bone = &mut skeleton.bones[i];
                     let mut angle = std::mem::replace(&mut bone.angle, Channel::new(0.0));
                     self.channel(&mut angle, &bloc, "angle", end);
                     skeleton.bones[i].angle = angle;
                 }
                 let n = skeleton.bones.len();
+                let mut actions = std::mem::take(&mut skeleton.actions);
+                for (a, act) in actions.iter_mut().enumerate() {
+                    let aloc = format!("{loc} > action {a} \"{}\"", act.name);
+                    self.action(act, &aloc, n);
+                }
+                // an action whose driver is missing cannot play
+                if self.repair {
+                    actions.retain(|act| act.driver.is_none_or(|d| d < n));
+                }
+                skeleton.actions = actions;
                 for child in children {
                     self.layer(child, end, Some(n));
                 }
@@ -347,6 +400,250 @@ impl Checker {
                     } else if *w < 0.0 {
                         *w = 0.0;
                     }
+                }
+            }
+        }
+    }
+
+    /// A shape: its bone binding, points, width profile, point keys and
+    /// weights.
+    fn shape(&mut self, shape: &mut fanimate_core::Shape, sloc: &str, end: i32, bones: Option<usize>) {
+        let problem = match (shape.bone, bones) {
+            (None, _) => None,
+            (Some(_), None) => Some("is bound to a bone but is not inside a bone layer".to_owned()),
+            (Some(b), Some(n)) if b >= n => Some(format!("is bound to bone {b}, but the skeleton has {n}")),
+            (Some(_), Some(_)) => None,
+        };
+        if let Some(p) = problem {
+            self.issue(
+                Severity::Warning,
+                sloc,
+                format!("{p}; it will not move with the rig"),
+                true,
+            );
+            if self.repair {
+                shape.bone = None;
+            }
+        }
+        if shape.path.points().any(|p| !p.is_finite()) {
+            self.issue(Severity::Error, sloc, "path has non-finite points".into(), false);
+        }
+        self.widths(shape, sloc);
+        self.path_keys(shape, sloc, end);
+        self.skin(shape, sloc, bones);
+    }
+
+    /// Drawings: on frames that are not negative, in order, one per frame.
+    fn cels(&mut self, cels: &mut Vec<fanimate_core::Cel>, loc: &str) {
+        let negative = cels.iter().filter(|c| c.frame < 0).count();
+        if negative > 0 {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!("{negative} drawing(s) on negative frames; they are removed"),
+                true,
+            );
+            if self.repair {
+                cels.retain(|c| c.frame >= 0);
+            }
+        }
+        let sorted = cels.windows(2).all(|w| w[0].frame < w[1].frame);
+        if !sorted {
+            self.issue(
+                Severity::Error,
+                loc,
+                "drawings are out of order or share a frame".into(),
+                true,
+            );
+            if self.repair {
+                // stable: of drawings on one frame, the later in the file wins
+                cels.sort_by_key(|c| c.frame);
+                let taken = std::mem::take(cels);
+                for c in taken {
+                    match cels.last_mut() {
+                        Some(last) if last.frame == c.frame => *last = c,
+                        _ => cels.push(c),
+                    }
+                }
+            }
+        }
+    }
+
+    /// An image layer: a picture the project holds, a sensible size and
+    /// mesh, and bone references that exist.
+    /// A media file reference: a safe name, for a file the project holds.
+    fn media_file(&mut self, name: &str, loc: &str, what: &str) {
+        if !crate::is_media_name(name) {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!("{what} name {name:?} is not inside the project's media folder; it is not loaded"),
+                false,
+            );
+        } else if !self.media.contains(name) {
+            let shown = if what == "picture" {
+                "the layer shows a grey placeholder"
+            } else {
+                "it is silent"
+            };
+            self.issue(
+                Severity::Warning,
+                loc,
+                format!("{what} {name} is missing; {shown}"),
+                false,
+            );
+        }
+    }
+
+    fn image(&mut self, img: &mut fanimate_core::Image, loc: &str, bones: Option<usize>) {
+        self.media_file(&img.media, loc, "picture");
+        if !(img.width.is_finite() && img.width > 0.0 && img.height.is_finite() && img.height > 0.0) {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!("size {}x{} is not positive", img.width, img.height),
+                true,
+            );
+            if self.repair {
+                img.width = 100.0;
+                img.height = 100.0;
+            }
+        }
+        if img.grid != img.cells() {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!("mesh of {}x{} cells is out of range", img.grid[0], img.grid[1]),
+                true,
+            );
+            if self.repair {
+                img.grid = img.cells();
+                img.skin = None;
+            }
+        }
+        let n = bones.unwrap_or(0);
+        if img.bone.is_some_and(|b| b >= n) {
+            self.issue(
+                Severity::Warning,
+                loc,
+                "is bound to a bone that does not exist; it will not move with the rig".into(),
+                true,
+            );
+            if self.repair {
+                img.bone = None;
+            }
+        }
+        if let Some(skin) = &img.skin {
+            let bad = img.valid_skin().is_none()
+                || bones.is_none()
+                || skin
+                    .iter()
+                    .flatten()
+                    .any(|(b, w)| *b >= n || !(w.is_finite() && *w >= 0.0));
+            if bad {
+                self.issue(
+                    Severity::Error,
+                    loc,
+                    "mesh weights do not match the mesh or name missing bones; they are removed".into(),
+                    true,
+                );
+                if self.repair {
+                    img.skin = None;
+                }
+            }
+        }
+    }
+
+    /// An action: its driver and bones exist, its keys are sound.
+    fn action(&mut self, act: &mut fanimate_core::RigAction, loc: &str, bones: usize) {
+        if act.driver.is_some_and(|d| d >= bones) {
+            self.issue(
+                Severity::Error,
+                loc,
+                "its Smart Bone does not exist; the action is removed".into(),
+                true,
+            );
+        }
+        if act.length < 1 {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!("length {} is not positive", act.length),
+                true,
+            );
+            if self.repair {
+                act.length = 1;
+            }
+        }
+        let missing = act.bones.iter().filter(|b| b.bone >= bones).count();
+        if missing > 0 {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!("animates {missing} bone(s) that do not exist; those keys are removed"),
+                true,
+            );
+            if self.repair {
+                act.bones.retain(|b| b.bone < bones);
+            }
+        }
+        for b in &mut act.bones {
+            let name = format!("bone {} angle", b.bone);
+            self.channel(&mut b.angle, loc, &name, act.length);
+        }
+        for s in &mut act.shapes {
+            let sloc = format!("{loc} > layer {} shape {}", s.layer.0, s.shape);
+            self.keys(&mut s.path_keys, |p| p.is_finite(), &sloc, act.length);
+        }
+    }
+
+    /// Smooth binding: one weight list per point, naming bones that exist,
+    /// with finite, non-negative weights.
+    fn skin(&mut self, shape: &mut fanimate_core::Shape, loc: &str, bones: Option<usize>) {
+        let points = shape.path.on_curve_count();
+        let Some(skin) = &mut shape.skin else { return };
+        let Some(n) = bones else {
+            self.issue(
+                Severity::Warning,
+                loc,
+                "has bone weights but is not inside a bone layer; it will not move with a rig".into(),
+                true,
+            );
+            if self.repair {
+                shape.skin = None;
+            }
+            return;
+        };
+        if skin.len() != points {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!(
+                    "has bone weights for {} points but {points} points; the weights are removed",
+                    skin.len()
+                ),
+                true,
+            );
+            if self.repair {
+                shape.skin = None;
+            }
+            return;
+        }
+        let bad = skin
+            .iter()
+            .flatten()
+            .filter(|(b, w)| *b >= n || !(w.is_finite() && *w >= 0.0))
+            .count();
+        if bad > 0 {
+            self.issue(
+                Severity::Error,
+                loc,
+                format!("{bad} bone weight(s) name a missing bone or are not a valid number"),
+                true,
+            );
+            if self.repair {
+                for point in skin.iter_mut() {
+                    point.retain(|(b, w)| *b < n && w.is_finite() && *w >= 0.0);
                 }
             }
         }
@@ -610,6 +907,104 @@ mod tests {
         };
         let frames: Vec<_> = shapes[0].path_keys.iter().map(|k| k.frame).collect();
         assert_eq!(frames, [0, 2]);
+    }
+
+    #[test]
+    fn bad_bone_settings_and_weights_are_repaired() {
+        let mut doc = rigged();
+        let LayerKind::Bone { skeleton, children } = &mut doc.layers[0].kind else {
+            unreachable!()
+        };
+        skeleton.bones[0].limits = Some([1.0, -1.0]);
+        skeleton.bones[0].strength = Some(f32::NAN);
+        let LayerKind::Vector { shapes } = &mut children[0].kind else {
+            unreachable!()
+        };
+        let n = shapes[0].path.on_curve_count();
+        shapes[0].skin = Some(vec![vec![(0, 1.0), (9, 0.5)]; n]);
+        shapes[1].skin = Some(vec![vec![(0, 1.0)]; 2]);
+        let report = validate(&doc);
+        assert_eq!(report.issues.len(), 4, "{report}");
+        repair(&mut doc);
+        assert!(validate(&doc).is_clean(), "{}", validate(&doc));
+    }
+
+    #[test]
+    fn broken_actions_are_repaired() {
+        let mut doc = rigged();
+        let LayerKind::Bone { skeleton, .. } = &mut doc.layers[0].kind else {
+            unreachable!()
+        };
+        let mut good = fanimate_core::RigAction::new("good", Some(0), 10);
+        good.bones.push(fanimate_core::actions::BoneKeys {
+            bone: 5,
+            angle: Channel::new(0.0),
+        });
+        skeleton.actions.push(good);
+        skeleton
+            .actions
+            .push(fanimate_core::RigAction::new("orphan", Some(9), 10));
+        assert_eq!(validate(&doc).unresolved_errors().count(), 2);
+        repair(&mut doc);
+        assert!(validate(&doc).is_clean(), "{}", validate(&doc));
+        let LayerKind::Bone { skeleton, .. } = &doc.layers[0].kind else {
+            unreachable!()
+        };
+        assert_eq!(skeleton.actions.len(), 1);
+        assert!(skeleton.actions[0].bones.is_empty());
+    }
+
+    #[test]
+    fn image_layers_are_checked() {
+        let mut doc = rigged();
+        let mut img = fanimate_core::Image::new("../outside.png", f32::NAN, 10.0);
+        img.grid = [0, 2];
+        let layer = doc.new_layer("pic", LayerKind::Image(img));
+        doc.layers.push(layer);
+        let report = validate(&doc);
+        assert_eq!(report.issues.len(), 3, "{report}");
+        repair(&mut doc);
+        // the bad name stays reported: there is no safe repair
+        assert_eq!(validate(&doc).issues.len(), 1);
+        let ok = fanimate_core::Image::new("media/a.png", 1.0, 1.0);
+        let layer = doc.new_layer("pic2", LayerKind::Image(ok));
+        doc.layers.push(layer);
+        // missing picture: a warning
+        assert!(
+            validate(&doc)
+                .issues
+                .iter()
+                .any(|i| i.severity == Severity::Warning)
+        );
+    }
+
+    #[test]
+    fn drawings_are_checked_and_repaired() {
+        use fanimate_core::{Cel, Path, Shape, Style, Vec2};
+        let mut doc = rigged();
+        let mut a = Cel::new(5);
+        let mut bad = Shape::new(
+            "s",
+            Path::new().move_to(Vec2::ZERO).line_to(Vec2::X),
+            Style::default(),
+        );
+        bad.widths = Some(vec![1.0]);
+        a.line.push(bad);
+        let layer = doc.new_layer(
+            "anim",
+            LayerKind::Frames {
+                cels: vec![a, Cel::new(-1), Cel::new(2)],
+            },
+        );
+        doc.layers.push(layer);
+        let report = validate(&doc);
+        assert_eq!(report.unresolved_errors().count(), 3, "{report}");
+        repair(&mut doc);
+        assert!(validate(&doc).is_clean(), "{}", validate(&doc));
+        let LayerKind::Frames { cels } = &doc.layers.last().unwrap().kind else {
+            unreachable!()
+        };
+        assert_eq!(cels.iter().map(|c| c.frame).collect::<Vec<_>>(), [2, 5]);
     }
 
     #[test]

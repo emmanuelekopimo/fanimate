@@ -179,6 +179,9 @@ const FANIMATE: &[(&str, Action)] = &[
     ("Ctrl+O", Open),
     ("Ctrl+S", Save),
     ("Ctrl+Shift+S", SaveAs),
+    // Adobe Animate's Import to Stage
+    ("Ctrl+R", Import),
+    ("Ctrl+Shift+R", ExportVideo),
     ("Ctrl+Q", Quit),
     // Edit
     ("Ctrl+Z", Undo),
@@ -201,12 +204,15 @@ const FANIMATE: &[(&str, Action)] = &[
     ("F1", CommandPalette),
     // Layer
     ("Ctrl+Shift+N", NewVectorLayer),
+    ("Ctrl+Alt+N", NewFramesLayer),
     ("Ctrl+G", GroupLayers),
     ("Ctrl+Shift+G", Ungroup),
     ("Ctrl+CloseBracket", MoveLayerUp),
     ("Ctrl+OpenBracket", MoveLayerDown),
     ("Ctrl+Shift+H", ToggleVisibility),
     ("Ctrl+Shift+I", LayerProperties),
+    ("Ctrl+B", BindToBone),
+    ("Ctrl+Shift+B", BindSmoothly),
     // Animation (F6 / Shift+F6 as in Adobe Animate)
     ("Space", PlayPause),
     ("Right", NextFrame),
@@ -217,7 +223,10 @@ const FANIMATE: &[(&str, Action)] = &[
     ("Alt+Left", PrevKey),
     ("F6", AddKey),
     ("Shift+F6", DeleteKey),
+    ("F7", NewDrawing),
     // View
+    ("Alt+O", ToggleOnionSkin),
+    ("Alt+L", ToggleLightTable),
     ("Ctrl+Equals", ZoomIn),
     ("Ctrl+Plus", ZoomIn),
     ("Ctrl+Minus", ZoomOut),
@@ -238,6 +247,7 @@ const FANIMATE: &[(&str, Action)] = &[
     ("M", Tool(Tool::ManipulateBones)),
     ("Shift+M", Tool(Tool::AddBone)),
     ("J", Tool(Tool::SelectBone)),
+    ("W", Tool(Tool::PaintWeights)),
     ("H", Tool(Tool::Pan)),
     ("Z", Tool(Tool::Zoom)),
 ];
@@ -248,6 +258,8 @@ const MOHO: &[(&str, Action)] = &[
     ("Ctrl+O", Open),
     ("Ctrl+S", Save),
     ("Ctrl+Shift+S", SaveAs),
+    // Moho's Export Animation
+    ("Ctrl+Shift+R", ExportVideo),
     ("Ctrl+Q", Quit),
     // Edit (Moho: redo is Ctrl+Shift+Z only; Ctrl+Y is its tracing image)
     ("Ctrl+Z", Undo),

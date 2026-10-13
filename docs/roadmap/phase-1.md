@@ -6,14 +6,16 @@ Companion to the [product vision](../product-vision.md). The brand assets propos
 
 ## Status
 
-*Updated 13 October 2026. Target dates for each milestone are in [section 4](#4-milestones).*
+*Updated 13 October 2026 (M4 built). Target dates for each milestone are in [section 4](#4-milestones).*
 
 | Milestone | Status |
 |---|---|
 | M0: Ground work | **Done** |
 | M1: Engine spike | **Done on Windows**; macOS and Linux measurements outstanding |
 | M2: Draw | **Built**; the usability pass with an artist and the exit check are outstanding |
-| M3 to M6 | Not started |
+| M3: Rig | **Built**; the exit check (a character from a PSD rigged by a tester) and the reference-hardware benchmark are outstanding |
+| M4: Frame-by-frame and voice | **Built**; the exit check (a hand-drawn cycle and a lip-synced line exported to MP4 by a tester) is outstanding |
+| M5 and M6 | Not started |
 
 ### M0: Ground work (done)
 
@@ -90,6 +92,48 @@ Exit check: an artist can draw, animate by keyframes, save and recover after a f
 - [ ] Usability pass with an artist, then the exit check
 
 Not yet tested by hand: pen pressure on a real tablet, and the drawing tools' feel at different zooms. The editing logic behind every tool is covered by unit tests.
+
+### M3: Rig (built; exit check outstanding)
+
+Exit check: a character from a PSD is rigged and animated; 40-bone rig at 60 fps.
+
+- [x] Bone tools: Add Bone (draws chains from the selected bone; makes a bone layer if none is selected), Select Bone (edits the rest pose by dragging joint or tip), Manipulate Bones (inverse kinematics by default, Alt for one bone, always keying the current frame so the rest pose is kept), Delete removes a bone and its children keep their place
+- [x] Bone settings in Properties: name, length, angle limits, pinned (IK stops there) and strength
+- [x] Binding: Bind to Selected Bone (Ctrl+B, rigid, keeps artwork in place on screen), Bind Smoothly (Ctrl+Shift+B, per-point weights from bone distance), Release from Bones, and Paint Weights (W) to brush weights for the selected bone
+- [x] Smart Bones and the Actions panel: regular actions inserted into the timeline, Smart Bone actions that reshape artwork and turn other bones as their driver turns, several adding up; actions edited in place with a banner over the timeline ([spec](../spec/fnm.md#actions))
+- [x] Mesh deformation: image layers bend with bones on a mesh (8×8 by default) with automatic weights
+- [x] Image layers and PSD import: File › Import (Ctrl+R) brings in PNG and JPEG pictures, and Photoshop files as a group of image layers with their groups, positions, visibility and opacity; pictures live in the project's `media` folder, stored once, and render on the GPU like everything else
+- [x] Rig health check in Properties: bones that move nothing or have no length, Smart Bones that do nothing yet, no longer fit their artwork, or clash with another on the same driver, and keyframes on hidden layers
+- [x] The benchmark rig now has 10 Smart Bones, as the Gate 1 budget specifies
+- [ ] Exit check with a tester and a real PSD character
+- [ ] Benchmark on the reference hardware (macOS and Linux still outstanding from M1)
+
+Not in M3, and why:
+
+- **Rig templates, retargeting and physics** (WS5) are left for later: templates need artwork and testers, and the roadmap allows physics to slip first. They are not part of the M3 exit check.
+- **Per-limb FK/IK blending**: posing uses IK interactively and stores ordinary keys, which is how Moho animators work; a stored IK target that blends with FK can follow if testers ask for it.
+- **Weighted PSD rigs in other tools' formats** wait for the M5 importers.
+
+### M4: Frame-by-frame and voice (built; exit check outstanding)
+
+Exit check: a hand-drawn cycle and a lip-synced line are exported to MP4.
+
+- [x] Frame-by-frame layers: a drawing per exposure, each with rough, colour, line and overlay sub-layers (renders leave out the rough); New Drawing (F7) copies the drawing on show, and the timeline shows exposures as blocks ([spec](../spec/fnm.md#type-frames))
+- [x] Onion skin (Alt+O): earlier and later drawings or frames tinted in two colours, with how many, keys only or every frame, and selected or all layers, remembered between sessions
+- [x] Light table (Alt+L): every layer but the selected ones fades
+- [x] X-sheet panel beside the Timeline: frames down the page, a column per layer, drawing numbers with their holds, switch layers as a mouth chart, key marks; click to go to a frame, right-click for drawing and key commands
+- [x] Switch layers: one child shown at a time, chosen by name on keys from the layer and key menus or Properties; the timeline names each key's choice ([spec](../spec/fnm.md#type-switch))
+- [x] Audio layers: WAV import (File › Import), start frame and volume in Properties, playback in time with the timeline, waveforms in the timeline ([spec](../spec/fnm.md#type-audio))
+- [x] Lip sync from sound: Rhubarb Lip Sync, shipped with Fanimate, listens to the dialogue in the background (no console window) and keys the selected switch layer in one undo step; mouths can be named after Rhubarb's letters or the Preston Blair set
+- [x] SVG import: each top-level group (Inkscape and Illustrator layers) becomes a vector layer; outlines, solid colours, opacity, line widths and transforms come through, even-odd fills are refitted, and the status says what was simplified or left out (text, pictures, gradients, clips, masks, filters)
+- [x] Video export v1: File › Export Video (Ctrl+Shift+R) to MP4 or MKV (H.264 with the project's sound as AAC), animated GIF or PNG sequence, at any size and frame range. Renders run in the render queue, a window of its own process that keeps going when the editor closes, with progress, cancel, render again and reordering (drag, arrows or right-click). `fanimate-cli export` does the same headless. FFmpeg ships as a separate program built from published sources ([legal note](../legal/video-export.md))
+- [ ] Exit check with a tester
+- [ ] Legal sign-off on the codec approach and the H.264 patent question ([review scope](../legal/review-scope.md), section 4)
+
+Not in M4, and why:
+
+- **AV1 and WebM export**: royalty-free, and recommended as an option in the legal note, but they need another encoder in the FFmpeg build. MP4 and MKV with H.264 cover the exit check.
+- **Other sound formats** (MP3, OGG): WAV is what Rhubarb reads and what dialogue recording tools produce; others can follow.
 
 ### First 30 days checklist (section 7)
 
