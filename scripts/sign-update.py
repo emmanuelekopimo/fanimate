@@ -19,7 +19,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 
 def main() -> int:
-    seed = os.environ.get("UPDATE_SIGNING_KEY", "").strip()
+    # a secret pasted or piped on Windows can carry a byte-order mark
+    seed = os.environ.get("UPDATE_SIGNING_KEY", "").strip().lstrip("\ufeff").strip()
     if not seed:
         print("sign-update: UPDATE_SIGNING_KEY is not set; nothing signed", file=sys.stderr)
         return 1

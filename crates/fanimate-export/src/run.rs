@@ -315,13 +315,20 @@ mod tests {
         dir
     }
 
-    /// GPU tests skip cleanly where no adapter exists.
-    fn gpu_available() -> bool {
-        let ok = Gpu::headless().is_ok();
-        if !ok {
+    /// Held by each GPU test, so they take turns: creating devices on
+    /// several threads at once has crashed Windows' software renderer (the
+    /// one CI runners use) with an access violation.
+    static GPU: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// The GPU, for one test at a time; `None` (and the test skips cleanly)
+    /// where no adapter exists.
+    fn gpu() -> Option<std::sync::MutexGuard<'static, ()>> {
+        let turn = GPU.lock().unwrap_or_else(|e| e.into_inner());
+        if Gpu::headless().is_err() {
             eprintln!("no GPU adapter; skipping");
+            return None;
         }
-        ok
+        Some(turn)
     }
 
     fn small(format: Format, frames: i32) -> Settings {
@@ -336,9 +343,7 @@ mod tests {
 
     #[test]
     fn png_sequences_number_their_frames() {
-        if !gpu_available() {
-            return;
-        }
+        let Some(_turn) = gpu() else { return };
         let dir = temp_dir("png");
         let mut seen = Vec::new();
         export(
@@ -365,9 +370,7 @@ mod tests {
 
     #[test]
     fn gifs_loop_their_frames() {
-        if !gpu_available() {
-            return;
-        }
+        let Some(_turn) = gpu() else { return };
         let dir = temp_dir("gif");
         let out = dir.join("hello.gif");
         export(&samples::hello(), &small(Format::Gif, 4), &out, &mut |_, _| true).unwrap();
@@ -381,9 +384,7 @@ mod tests {
 
     #[test]
     fn cancelling_leaves_nothing_behind_and_keeps_the_old_file() {
-        if !gpu_available() {
-            return;
-        }
+        let Some(_turn) = gpu() else { return };
         let dir = temp_dir("cancel");
         let out = dir.join("hello.gif");
         std::fs::write(&out, b"the previous export").unwrap();
@@ -399,9 +400,7 @@ mod tests {
 
     #[test]
     fn videos_are_encoded_by_ffmpeg_with_their_sound() {
-        if !gpu_available() {
-            return;
-        }
+        let Some(_turn) = gpu() else { return };
         if ffmpeg::find().is_none() {
             eprintln!("no ffmpeg; skipping");
             return;
