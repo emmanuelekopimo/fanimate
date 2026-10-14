@@ -364,7 +364,12 @@ impl Editor {
                 }
                 let local_tolerance = tolerance * inv.matrix2.determinant().abs().sqrt();
                 let local = inv.transform_point2(p);
-                let closed = item.shape.path.cmds.iter().any(|c| matches!(c, fanimate_core::PathCmd::Close));
+                let closed = item
+                    .shape
+                    .path
+                    .cmds
+                    .iter()
+                    .any(|c| matches!(c, fanimate_core::PathCmd::Close));
                 let hit = if interior && closed && item.shape.style.fill.is_none() {
                     // only at click time, so the copy costs nothing per frame
                     let mut filled = item.shape.as_ref().clone();
