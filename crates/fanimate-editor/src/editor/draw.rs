@@ -339,16 +339,19 @@ impl Editor {
     /// The topmost visible shape under `p` (document space), within
     /// `tolerance` document units: its layer and index in that layer.
     pub fn shape_at(&self, p: Vec2, tolerance: f32) -> Option<(LayerId, usize)> {
-        self.hit(p, tolerance, false)
+        self.hit(p, tolerance, false, false)
     }
 
     /// Like [`shape_at`](Self::shape_at), among the shapes the tools edit
     /// (see [`Editor::layer_shapes`]).
     fn editable_shape_at(&self, p: Vec2, tolerance: f32) -> Option<(LayerId, usize)> {
-        self.hit(p, tolerance, true)
+        self.hit(p, tolerance, true, false)
     }
 
-    fn hit(&self, p: Vec2, tolerance: f32, editable: bool) -> Option<(LayerId, usize)> {
+    /// The shape under `p` that the topmost hit is, where a closed outline
+    /// with no fill yet counts as hit inside, as the Paint Bucket needs.
+    /// `interior`: treat closed outlines as filled.
+    fn hit(&self, p: Vec2, tolerance: f32, editable: bool, interior: bool) -> Option<(LayerId, usize)> {
         let items = evaluate(&self.doc, self.frame);
         items
             .iter()
@@ -360,10 +363,17 @@ impl Editor {
                     return None;
                 }
                 let local_tolerance = tolerance * inv.matrix2.determinant().abs().sqrt();
-                if !item.shape.contains(inv.transform_point2(p), local_tolerance) {
-                    return None;
-                }
-                Some((item.layer, item.index))
+                let local = inv.transform_point2(p);
+                let closed = item.shape.path.cmds.iter().any(|c| matches!(c, fanimate_core::PathCmd::Close));
+                let hit = if interior && closed && item.shape.style.fill.is_none() {
+                    // only at click time, so the copy costs nothing per frame
+                    let mut filled = item.shape.as_ref().clone();
+                    filled.style.fill = Some(fanimate_core::Color::BLACK);
+                    filled.contains(local, local_tolerance)
+                } else {
+                    item.shape.contains(local, local_tolerance)
+                };
+                hit.then_some((item.layer, item.index))
             })
     }
 
@@ -371,7 +381,7 @@ impl Editor {
     /// a brush stroke, recolour it with the line colour. One undo step.
     /// Returns whether anything changed.
     pub fn paint_at(&mut self, p: Vec2, tolerance: f32) -> bool {
-        let Some((id, index)) = self.editable_shape_at(p, tolerance) else {
+        let Some((id, index)) = self.hit(p, tolerance, true, true) else {
             return false;
         };
         let Some(shape) = self.shape(id, index) else {
@@ -651,6 +661,23 @@ mod tests {
         ed.run(crate::Action::Undo);
         assert_eq!(shapes(&ed, id)[1].style.stroke.unwrap().color, Color::BLACK);
         assert!(!ed.paint_at(Vec2::splat(500.0), 1.0));
+    }
+
+    #[test]
+    fn paint_bucket_fills_inside_an_outline_with_no_fill() {
+        let (mut ed, id) = editor();
+        // a rectangle drawn with Fill off is only an outline
+        ed.draw.fill = None;
+        ed.add_drag_shape(Tool::Rectangle, Vec2::ZERO, Vec2::splat(100.0), false, false, 1.0);
+        assert!(shapes(&ed, id)[0].style.fill.is_none());
+        let red = Color::rgb(1.0, 0.0, 0.0);
+        ed.draw.fill = Some(red);
+        // clicking in the middle, far from the outline, fills it
+        assert!(ed.paint_at(Vec2::splat(50.0), 1.0));
+        assert_eq!(shapes(&ed, id)[0].style.fill, Some(red));
+        // an open line is still only hit near the line
+        draw_line(&mut ed, Vec2::new(0.0, 200.0), Vec2::new(200.0, 300.0));
+        assert!(!ed.paint_at(Vec2::new(150.0, 220.0), 1.0));
     }
 
     #[test]

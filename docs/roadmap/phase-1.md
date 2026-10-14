@@ -151,6 +151,8 @@ Exit check: import corpus pass rate at or above 75%; the alpha installs on a cle
 - [x] Workspaces (Window › Workspace: Animate, Draw, Rig, Frame by Frame, Review), and a command palette that ranks prefix, word-start, substring and fuzzy matches, puts commands that can run first and remembers recent ones
 - [x] Docs: [user manual outline](../manual/README.md), [architecture overview](../architecture.md), [importing](../import.md), [installing and updating](../install.md), [web build](../web.md)
 - [x] First public alpha: [0.1.0 release notes](../releases/v0.1.0.md)
+- [x] Tested by hand on a 1366x768 Windows laptop (Intel HD Graphics 520): importing the Moho sample from the command line and the File menu, playback, crash recovery and the crash report after a forced kill, update checks against GitHub, a refused badly signed update and a full silent update and restart with the real installer, uninstalling, workspaces, the command palette, the web build in Chrome, and drawing, filling, undo and adding bones. That found one bug, now fixed with a test: the Paint Bucket did nothing inside a shape drawn with Fill off
+- [x] Benchmark after M5 on that laptop: 89 fps with the UI (40 bones, 10 Smart Bones), 0.73 ms CPU per frame for evaluating and tessellating; the budget is 60 fps
 - [ ] Import corpus: at least 100 Moho and 50 Animate files with consent, then the 75% measurement (so far: one MIT-licensed Moho rig and 205 openly licensed Animate test files import without a failure)
 - [ ] Code signing: Apple Developer ID and notarisation, Windows code-signing certificate (accounts not open yet)
 - [ ] Exit check on clean Windows, macOS and Linux machines, including an update to the next release (the update has been tested on Windows only)
