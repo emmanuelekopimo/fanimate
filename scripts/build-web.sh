@@ -25,7 +25,9 @@ if ! command -v wasm-bindgen > /dev/null || [ "$(wasm-bindgen --version | cut -d
     *) echo "build-web: install wasm-bindgen-cli $version (cargo install wasm-bindgen-cli --version $version)" >&2; exit 1 ;;
   esac
   tools="$root/target/wasm-bindgen-$version"
-  if [ ! -d "$tools" ]; then
+  # check the program, not the folder: CI's build cache can restore the
+  # folder without it
+  if [ ! -x "$tools/wasm-bindgen" ] && [ ! -x "$tools/wasm-bindgen.exe" ]; then
     mkdir -p "$tools"
     curl -fsSL "https://github.com/wasm-bindgen/wasm-bindgen/releases/download/$version/wasm-bindgen-$version-$triple.tar.gz" \
       | tar -xz -C "$tools" --strip-components=1
