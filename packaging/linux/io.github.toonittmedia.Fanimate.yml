@@ -7,6 +7,9 @@ runtime: org.gnome.Platform
 runtime-version: "47"
 sdk: org.gnome.Sdk
 command: fanimate
+# the Ubuntu 22.04 flatpak-builder runs appstream-compose, which newer SDKs
+# no longer ship; the metainfo file is installed as it is
+appstream-compose: false
 finish-args:
   - --share=ipc
   - --socket=wayland
