@@ -218,10 +218,12 @@ impl Queue {
     }
 
     /// Jobs a runner left half done when it stopped (closed or crashed)
-    /// go back to waiting.
+    /// go back to waiting, and a crashed or killed runner's unfinished
+    /// files are removed.
     pub fn recover(&self) {
         for e in self.jobs() {
             if e.status.state == State::Rendering {
+                crate::run::remove_parts(&e.job.output, e.job.settings.format);
                 let _ = self.set_status(
                     &e.job.id,
                     &Status {
@@ -346,6 +348,40 @@ mod tests {
         q.recover();
         let status = &q.jobs()[0].status;
         assert_eq!((status.state, status.done, status.total), (State::Waiting, 0, 48));
+        fs::remove_dir_all(q.root()).unwrap();
+    }
+
+    /// A runner killed mid-render (Task Manager, a crash) cannot remove its
+    /// `.part` files; the next runner does, and leaves finished files be.
+    #[test]
+    fn recovering_removes_a_killed_runners_unfinished_files() {
+        let q = queue("killed");
+        fs::create_dir_all(q.root()).unwrap();
+        let doc = samples::hello();
+        let rendering = Status {
+            state: State::Rendering,
+            done: 5,
+            total: 48,
+            message: None,
+        };
+        let video = q.root().join("scene.mp4");
+        let frames = q.root().join("scene.png");
+        for (out, format) in [(&video, Format::Mp4), (&frames, Format::Png)] {
+            let id = q.add(&doc, out, &Settings::for_doc(&doc, format)).unwrap();
+            q.set_status(&id, &rendering).unwrap();
+        }
+        let keep = ["scene.mp4", "scene_0000.png", "other_0001.png.part"];
+        let gone = ["scene.mp4.part", "scene_0001.png.part"];
+        for name in keep.iter().chain(&gone) {
+            fs::write(q.root().join(name), b"x").unwrap();
+        }
+        q.recover();
+        for name in keep {
+            assert!(q.root().join(name).exists(), "{name} is kept");
+        }
+        for name in gone {
+            assert!(!q.root().join(name).exists(), "{name} is removed");
+        }
         fs::remove_dir_all(q.root()).unwrap();
     }
 

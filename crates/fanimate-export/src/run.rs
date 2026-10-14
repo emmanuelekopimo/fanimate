@@ -135,6 +135,30 @@ fn part(out: &Path) -> PathBuf {
     out.with_file_name(name)
 }
 
+/// Remove the unfinished files an export to `out` left when its process
+/// was killed before it could clean up (a stop or failure removes them
+/// itself). Finished files are never touched.
+pub(crate) fn remove_parts(out: &Path, format: Format) {
+    if format != Format::Png {
+        let _ = std::fs::remove_file(part(out));
+        return;
+    }
+    // a PNG sequence writes one frame at a time, named after `out`
+    let (Some(dir), Some(stem)) = (out.parent(), out.file_stem()) else {
+        return;
+    };
+    let prefix = format!("{}_", stem.to_string_lossy());
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with(&prefix) && name.ends_with(".png.part") {
+            let _ = std::fs::remove_file(e.path());
+        }
+    }
+}
+
 fn png_sequence(
     frames: &mut Frames,
     total: u32,

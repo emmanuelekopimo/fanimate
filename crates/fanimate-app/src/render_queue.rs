@@ -73,6 +73,15 @@ pub fn run(theme: Theme) -> eframe::Result {
     let Some(lock) = queue.try_run() else {
         return Ok(());
     };
+    eframe::run_native(
+        // its own name, so its saved window never touches the editor's
+        "Fanimate Render Queue",
+        native_options(),
+        Box::new(move |cc| Ok(Box::new(QueueApp::new(cc, queue, lock, theme)))),
+    )
+}
+
+fn native_options() -> eframe::NativeOptions {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("Render Queue - Fanimate")
         .with_app_id("fanimate-render-queue")
@@ -83,16 +92,15 @@ pub fn run(theme: Theme) -> eframe::Result {
     {
         viewport = viewport.with_icon(Arc::new(icon));
     }
-    let options = eframe::NativeOptions {
+    eframe::NativeOptions {
         viewport,
+        wgpu_options: crate::wgpu_options(),
+        // closed while minimised (from the taskbar), eframe would save the
+        // minimised window and open it shrunk into a corner from then on;
+        // `QueueApp::save` clears what older versions saved
+        persist_window: false,
         ..Default::default()
-    };
-    eframe::run_native(
-        // its own name, so its saved window never touches the editor's
-        "Fanimate Render Queue",
-        options,
-        Box::new(move |cc| Ok(Box::new(QueueApp::new(cc, queue, lock, theme)))),
-    )
+    }
 }
 
 /// The rendering thread, and how to stop it.
@@ -259,6 +267,19 @@ impl QueueApp {
         self.entries.iter().find(|e| e.job.id == current)
     }
 
+    /// Jobs rendering or waiting, read from the queue itself: the list on
+    /// screen can be a poll behind, or not drawn at all while minimised.
+    fn unfinished(&self) -> usize {
+        let waiting = self
+            .queue
+            .jobs()
+            .iter()
+            .filter(|e| !e.status.state.is_finished())
+            .count();
+        // the worker may have taken a job before its status says so
+        waiting.max(usize::from(self.worker.current().is_some()))
+    }
+
     /// Stop job `id`: the running one through the worker, a waiting one
     /// by marking it.
     fn cancel(&mut self, id: &str) {
@@ -302,6 +323,19 @@ impl QueueApp {
 }
 
 impl eframe::App for QueueApp {
+    // here, not in `ui`: eframe skips `ui` while the window is minimised or
+    // hidden, and closing it from the taskbar then must still ask
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close && self.unfinished() > 0 {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            // bring the window back so the question is seen
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+            self.confirm_close = true;
+            ctx.request_repaint();
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         if self.polled.elapsed() >= POLL {
@@ -310,10 +344,6 @@ impl eframe::App for QueueApp {
         let busy = self.entries.iter().any(|e| !e.status.state.is_finished());
         if busy {
             ctx.request_repaint_after(POLL);
-        }
-        if ctx.input(|i| i.viewport().close_requested()) && !self.allow_close && self.rendering().is_some() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.confirm_close = true;
         }
 
         let p = self.palette;
@@ -340,6 +370,18 @@ impl eframe::App for QueueApp {
 
     fn on_exit(&mut self) {
         self.worker.stop();
+    }
+
+    // the window opens at its default size every time (`persist_window` is
+    // off), so drop any size an earlier version saved: one saved while
+    // minimised opens the window shrunk into a corner. eframe loads it
+    // even when not saving it; "window" is its (private) key.
+    fn save(&mut self, storage: &mut dyn eframe::Storage) {
+        storage.set_string("window", String::new());
+    }
+
+    fn persist_egui_memory(&self) -> bool {
+        false
     }
 }
 
@@ -428,7 +470,7 @@ impl QueueApp {
             .corner_radius(6.0)
             .inner_margin(10.0);
         let mut action: Option<RowAction> = None;
-        let inner = frame.show(ui, |ui| {
+        let resp = clickable_row(ui, Id::new(("queue-row", &id)), frame, |ui| {
             ui.set_min_width(ui.available_width());
             // buttons first, from the right, so long names and folders are
             // cut short before them rather than running underneath
@@ -501,8 +543,7 @@ impl QueueApp {
             ui.add(bar);
             ui.label(RichText::new(text).size(11.0).color(color));
         });
-        let rect = inner.response.rect;
-        let resp = ui.interact(rect, Id::new(("queue-row", &id)), egui::Sense::click());
+        let rect = resp.rect;
         menus::context_menu(&resp, |ui| {
             let mut item = |ui: &mut egui::Ui, label: &str, enabled: bool, a: RowAction| {
                 if ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
@@ -539,11 +580,7 @@ impl QueueApp {
             Some(RowAction::Retry) => self.retry(&id),
             Some(RowAction::Remove) => self.remove(&id),
             Some(RowAction::Open) => open_path(&e.job.output),
-            Some(RowAction::ShowFolder) => {
-                if let Some(dir) = e.job.output.parent() {
-                    open_path(dir);
-                }
-            }
+            Some(RowAction::ShowFolder) => show_in_folder(&e.job.output),
             None => {}
         }
         rect
@@ -551,17 +588,21 @@ impl QueueApp {
 
     fn confirm_close_dialog(&mut self, ctx: &egui::Context) {
         let p = self.palette;
-        let name = self
-            .rendering()
-            .map(|e| file_name(&e.job.output))
-            .unwrap_or_default();
+        let text = match self.rendering() {
+            Some(e) => format!(
+                "{} is not finished. Closing stops it; it starts again, with the jobs still waiting, the next time the render queue opens.",
+                file_name(&e.job.output)
+            ),
+            None => {
+                "Renders are still waiting. Closing leaves them for the next time the render queue opens."
+                    .to_owned()
+            }
+        };
         let modal = egui::Modal::new(Id::new("confirm-close")).show(ctx, |ui| {
             ui.set_max_width(360.0);
             ui.label(RichText::new("Stop rendering?").size(15.0).strong());
             ui.add_space(4.0);
-            ui.label(format!(
-                "{name} is not finished. Closing stops it; it starts again, with the jobs still waiting, the next time the render queue opens."
-            ));
+            ui.label(text);
             ui.add_space(10.0);
             ui.horizontal(|ui| {
                 if ui
@@ -591,6 +632,19 @@ enum RowAction {
     Remove,
     Open,
     ShowFolder,
+}
+
+/// A framed row that senses clicks (for its context menu) below the widgets
+/// inside it, so its buttons still get their own clicks. An interact added
+/// over the row after its contents would sit on top and take them.
+fn clickable_row(
+    ui: &mut egui::Ui,
+    id: Id,
+    frame: egui::Frame,
+    contents: impl FnOnce(&mut egui::Ui),
+) -> egui::Response {
+    let row = egui::UiBuilder::new().id_salt(id).sense(egui::Sense::click());
+    ui.scope_builder(row, |ui| frame.show(ui, contents)).response
 }
 
 fn status_text(s: &Status, p: Palette) -> (String, egui::Color32) {
@@ -629,5 +683,177 @@ fn open_path(path: &Path) {
     };
     if let Err(e) = std::process::Command::new(program).arg(path).spawn() {
         log::warn!("could not open {}: {e}", path.display());
+    }
+}
+
+/// Open the folder holding `file` with the file selected, where the system
+/// can (Explorer, Finder); elsewhere just open the folder.
+fn show_in_folder(file: &Path) {
+    let mut cmd;
+    #[cfg(windows)]
+    {
+        // Explorer wants `/select,"path"`; the standard quoting wraps the
+        // whole argument instead, so pass it as written
+        use std::os::windows::process::CommandExt;
+        let mut select = std::ffi::OsString::from("/select,\"");
+        select.push(file);
+        select.push("\"");
+        cmd = std::process::Command::new("explorer");
+        cmd.raw_arg(select);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        cmd = std::process::Command::new("open");
+        cmd.arg("-R").arg(file);
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        let Some(dir) = file.parent() else { return };
+        cmd = std::process::Command::new("xdg-open");
+        cmd.arg(dir);
+    }
+    if let Err(e) = cmd.spawn() {
+        log::warn!("could not show {}: {e}", file.display());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use eframe::egui;
+    use eframe::egui_wgpu::WgpuSetup;
+
+    /// The queue window uses the editor's GPU backends: eframe's default
+    /// loads Vulkan, which crashed the window on open on an Intel HD 520.
+    #[test]
+    fn queue_window_uses_the_renderer_backends() {
+        let WgpuSetup::CreateNew(setup) = super::native_options().wgpu_options.wgpu_setup else {
+            panic!("the queue window should create its own wgpu instance");
+        };
+        assert_eq!(setup.instance_descriptor.backends, fanimate_render::backends());
+    }
+
+    /// Closing the window mid-render ends the render for good: the worker
+    /// stops within a frame, FFmpeg is stopped and waited for, its
+    /// unfinished file is removed and the job waits to start over.
+    #[test]
+    fn stopping_the_worker_ends_the_render() {
+        use fanimate_export::{Format, Queue, Settings, State};
+        use std::time::{Duration, Instant};
+        if fanimate_render::Gpu::headless().is_err() || fanimate_export::ffmpeg::find().is_none() {
+            eprintln!("no GPU adapter or no ffmpeg; skipping");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("fanimate-queue-stop-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let queue = Queue::new(dir.join("queue"));
+        let out = dir.join("long.mp4");
+        // far longer than the test waits
+        let settings = Settings {
+            format: Format::Mp4,
+            width: 320,
+            height: 180,
+            start: 0,
+            end: 100_000,
+        };
+        let id = queue
+            .add(&fanimate_core::samples::hello(), &out, &settings)
+            .unwrap();
+        let status = || queue.jobs().into_iter().find(|e| e.job.id == id).unwrap().status;
+
+        let mut worker = super::Worker::start(queue.clone(), egui::Context::default());
+        let started = Instant::now();
+        while status().done < 10 {
+            assert!(
+                started.elapsed() < Duration::from_secs(60),
+                "the render never got going"
+            );
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let stopping = Instant::now();
+        worker.stop();
+        assert!(
+            stopping.elapsed() < Duration::from_secs(5),
+            "the render took too long to stop"
+        );
+
+        assert_eq!(status().state, State::Waiting, "it starts over next time");
+        let left: Vec<_> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .filter(|n| n != "queue")
+            .collect();
+        assert!(left.is_empty(), "nothing is left beside the output: {left:?}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Click `button` at `pos` (press, then release) over two frames.
+    fn click(pos: egui::Pos2, button: egui::PointerButton) -> [Vec<egui::Event>; 2] {
+        let press = |pressed| egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        [
+            vec![egui::Event::PointerMoved(pos), press(true)],
+            vec![press(false)],
+        ]
+    }
+
+    /// A row's buttons get their clicks and the row its right-clicks. The
+    /// Open and Show in Folder buttons once did nothing: the row's own
+    /// click area, added after them, was on top.
+    #[test]
+    fn buttons_in_a_row_get_their_clicks() {
+        use std::cell::Cell;
+        let ctx = egui::Context::default();
+        let (button_rect, row_rect) = (Cell::new(egui::Rect::NOTHING), Cell::new(egui::Rect::NOTHING));
+        let (button_clicks, row_clicks, row_menus) = (Cell::new(0), Cell::new(0), Cell::new(0));
+        let run = |events: Vec<egui::Event>| {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(400.0, 200.0),
+                )),
+                events,
+                ..Default::default()
+            };
+            let mut out = ctx.run_ui(input, |ui| {
+                let row = super::clickable_row(
+                    ui,
+                    egui::Id::new("row"),
+                    egui::Frame::NONE.inner_margin(10.0),
+                    |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label("Hello Fanimate.mp4");
+                            let open = ui.button("Open");
+                            button_rect.set(open.rect);
+                            button_clicks.set(button_clicks.get() + usize::from(open.clicked()));
+                        });
+                    },
+                );
+                row_rect.set(row.rect);
+                row_clicks.set(row_clicks.get() + usize::from(row.clicked()));
+                row_menus.set(row_menus.get() + usize::from(row.secondary_clicked()));
+            });
+            // no renderer to upload the font atlas to
+            out.textures_delta.clear();
+        };
+        // a first frame to lay the row out, so the clicks find its widgets
+        run(Vec::new());
+        for events in click(button_rect.get().center(), egui::PointerButton::Primary) {
+            run(events);
+        }
+        // in the row's margin, away from its widgets
+        let margin = row_rect.get().left_top() + egui::vec2(4.0, 4.0);
+        for events in click(margin, egui::PointerButton::Secondary) {
+            run(events);
+        }
+        assert_eq!(
+            (button_clicks.get(), row_clicks.get()),
+            (1, 0),
+            "the button takes its click"
+        );
+        assert_eq!(row_menus.get(), 1, "a right-click still reaches the row");
     }
 }

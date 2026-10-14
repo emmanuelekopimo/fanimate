@@ -115,6 +115,18 @@ fn parse_args() -> Result<Args, String> {
     Ok(out)
 }
 
+/// The GPU setup for every window: the renderer's backend choice (DX12
+/// first on Windows), never eframe's default, which loads Vulkan and so
+/// crashes the process on some Intel drivers.
+pub fn wgpu_options() -> WgpuConfiguration {
+    let mut setup = WgpuSetupCreateNew::without_display_handle();
+    setup.instance_descriptor.backends = fanimate_render::backends();
+    WgpuConfiguration {
+        wgpu_setup: WgpuSetup::CreateNew(setup),
+        ..Default::default()
+    }
+}
+
 fn main() -> eframe::Result {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let args = match parse_args() {
@@ -152,13 +164,7 @@ fn main() -> eframe::Result {
             .with_titlebar_shown(false)
     };
 
-    // same backend choice as the renderer (DX12 first on Windows)
-    let mut setup = WgpuSetupCreateNew::without_display_handle();
-    setup.instance_descriptor.backends = fanimate_render::backends();
-    let mut wgpu_options = WgpuConfiguration {
-        wgpu_setup: WgpuSetup::CreateNew(setup),
-        ..Default::default()
-    };
+    let mut wgpu_options = wgpu_options();
     if !args.vsync {
         wgpu_options.surface.present_mode = wgpu::PresentMode::AutoNoVsync;
     }
