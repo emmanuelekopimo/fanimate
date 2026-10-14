@@ -1,12 +1,12 @@
 # Fanimate Phase 1: Foundation
 
-Companion to the [product vision](../product-vision.md). The brand assets proposed in section 1 live in [`brand/`](../../brand/). Phase 1 was first planned at about 12 months; it was re-planned in October 2026 to about 8 to 9 (see [section 4.1](#41-re-plan-13-october-2026)). It ends at **Gate 1: version 1.0**. This document starts with the brand, because every screen, installer and website in Phase 1 depends on it, and then breaks the engineering work into workstreams, milestones and acceptance tests.
+Companion to the [product vision](../product-vision.md). The brand assets proposed in section 1 live in [`brand/`](../../brand/). Phase 1 was first planned at about 12 months. M0 to M5 were built in about a week, so the rest is now planned at about 2 to 3 months, set by user testing and the public beta rather than by coding (see [section 4.1](#41-schedule)). It ends at **Gate 1: version 1.0**. This document starts with the brand, because every screen, installer and website in Phase 1 depends on it, and then breaks the engineering work into workstreams, milestones and acceptance tests.
 
 > **What comes from the vision and what is new.** The scope, the Gate 1 criteria and the performance budget are taken from the product vision. The brand proposals, the milestone order, the task lists and the acceptance tests are new proposals, written so the team can challenge and change them.
 
 ## Status
 
-*Updated 13 October 2026 (M4 built). Target dates for each milestone are in [section 4](#4-milestones).*
+*Updated when M5 was built and the first public alpha (0.1.0) was released. Estimated durations for the remaining work are in [section 4](#4-milestones).*
 
 | Milestone | Status |
 |---|---|
@@ -15,7 +15,8 @@ Companion to the [product vision](../product-vision.md). The brand assets propos
 | M2: Draw | **Built**; the usability pass with an artist and the exit check are outstanding |
 | M3: Rig | **Built**; the exit check (a character from a PSD rigged by a tester) and the reference-hardware benchmark are outstanding |
 | M4: Frame-by-frame and voice | **Built**; the exit check (a hand-drawn cycle and a lip-synced line exported to MP4 by a tester) is outstanding |
-| M5 and M6 | Not started |
+| M5: Bring your files | **Built and released as the public alpha (0.1.0)**; the importer corpus measurement, code signing and the clean-machine exit check are outstanding |
+| M6: Harden | Not started: it is mostly the public beta, which runs for weeks with real users |
 
 ### M0: Ground work (done)
 
@@ -134,6 +135,32 @@ Not in M4, and why:
 
 - **AV1 and WebM export**: royalty-free, and recommended as an option in the legal note, but they need another encoder in the FFmpeg build. MP4 and MKV with H.264 cover the exit check.
 - **Other sound formats** (MP3, OGG): WAV is what Rhubarb reads and what dialogue recording tools produce; others can follow.
+
+### M5: Bring your files (built; public alpha released)
+
+Exit check: import corpus pass rate at or above 75%; the alpha installs on a clean machine and updates itself to the next release.
+
+- [x] Moho importer (`.moho`, `.mohoproj`, Anime Studio's `.anime`): vector layers with curves, fills and outlines, point keys, groups, bone layers (bones reordered so parents come first, angle keys, limits), layer and point binding and automatic weights for flexible binding, switch layers and their keys, image layers, layer transforms and opacity. What is left out is listed after every import ([docs/import.md](../import.md))
+- [x] Animate importer (`.fla`, `.xfl`): shapes rebuilt from Animate's edge lists, rectangle and oval objects, layers and folders, keyframed drawings as frame-by-frame layers, a symbol on every keyframe as a group with transform keys (classic tweens, easing, extra turns), nested graphic symbols, library pictures, alpha. A lenient ZIP reader opens Animate's archives that strict readers refuse
+- [x] File › Open Moho or Animate Project (Ctrl+Shift+O), and `fanimate path.moho`, open an import as a new unsaved project
+- [x] `fanimate-cli import` converts a file; `fanimate-cli corpus <folder>` imports every file under a folder and reports clean, partial and failed imports; `fanimate-cli render` renders an import directly
+- [x] Installers: Windows (Inno Setup, per user, no administrator rights), macOS app bundle and disk image, Linux AppImage, `.deb` and Flatpak bundle, built by the release workflow with SHA-256 checksums ([docs/install.md](../install.md))
+- [x] Self-updater: checks GitHub releases in the background (can be turned off), downloads only when asked, verifies an Ed25519 signature made by the release workflow, waits for the render queue, asks to save, and installs: the Windows installer, a renamed app bundle on macOS, a single rename for the AppImage. Flatpak and `.deb` copies defer to the system. Tested end to end on Windows with a real installer, including a download with a wrong signature being refused
+- [x] Crash reports, sent only by the user: the panic hook writes a report, a locked session marker catches crashes no hook sees, and the next start offers to open a pre-filled GitHub issue. Sessions and crashes per computer are counted for the crash-free figure
+- [x] Web build (`fanimate-web`, WebGPU): opens a zipped `.fnm`, a Moho or an Animate project, plays, scrubs, shows and hides layers, pans and zooms ([docs/web.md](../web.md)). Tested in Chrome on Windows
+- [x] Workspaces (Window › Workspace: Animate, Draw, Rig, Frame by Frame, Review), and a command palette that ranks prefix, word-start, substring and fuzzy matches, puts commands that can run first and remembers recent ones
+- [x] Docs: [user manual outline](../manual/README.md), [architecture overview](../architecture.md), [importing](../import.md), [installing and updating](../install.md), [web build](../web.md)
+- [x] First public alpha: [0.1.0 release notes](../releases/v0.1.0.md)
+- [ ] Import corpus: at least 100 Moho and 50 Animate files with consent, then the 75% measurement (so far: one MIT-licensed Moho rig and 205 openly licensed Animate test files import without a failure)
+- [ ] Code signing: Apple Developer ID and notarisation, Windows code-signing certificate (accounts not open yet)
+- [ ] Exit check on clean Windows, macOS and Linux machines, including an update to the next release (the update has been tested on Windows only)
+
+Not in M5, and why:
+
+- **Moho actions and Smart Bones** are not imported: their poses are stored outside the main project data in the files seen so far. Needs files from the corpus to learn from.
+- **Animate shape tweens and newer motion tweens** are held at their keyframes. Shape tweens need shape morphing, which Fanimate's point keys can only do when both shapes have the same points.
+- **Fedora RPM**: the AppImage and the Flatpak cover Fedora; an RPM can follow if testers ask.
+- **Project sync between the web build and the desktop** is not built; projects move as `.zip` files.
 
 ### First 30 days checklist (section 7)
 
@@ -505,6 +532,7 @@ Eight workstreams run in parallel. Each lists its main tasks, its dependencies a
 |---|---|
 | Build and CI | Automated builds and tests on Windows, macOS, Linux and WASM for every change |
 | Installers | Windows installer, macOS DMG (signed and notarised), Linux AppImage, Flatpak and distro packages |
+| Self-updater | Checks GitHub releases in the background, downloads a new version, verifies its signature and installs it when the user agrees, rolling back if anything fails (P21). Works offline without complaint, can be turned off, can pin a version for a production, and never replaces the app while the render queue is rendering. Flatpak and distro packages update through their own package managers |
 | Web build | WebGPU build with documented limits; project sync with desktop |
 | Telemetry (opt-in) | Crash reports and anonymous performance data, off by default, to measure the crash-free metric |
 | Public repo | Licence files, contributing guide, code of conduct, issue templates |
@@ -512,7 +540,7 @@ Eight workstreams run in parallel. Each lists its main tasks, its dependencies a
 | Release trains | Monthly stability releases and four-monthly feature releases from the first public build |
 | Docs | User manual skeleton, `.fnm` specification, architecture overview |
 
-**Done when:** a stranger can download, install, open the sample project, and file a bug, on any of the three desktop platforms, without help from the team.
+**Done when:** a stranger can download, install, open the sample project, update to the next release, and file a bug, on any of the three desktop platforms, without help from the team.
 
 ---
 
@@ -520,19 +548,19 @@ Eight workstreams run in parallel. Each lists its main tasks, its dependencies a
 
 The order is built around risk: prove the engine and renderer first, because everything else rests on them, and leave the long-tail compatibility work (importers) for when the core is stable.
 
-| Milestone | Target | Theme | Main deliverables | Exit check |
+| Milestone | Status or estimate | Theme | Main deliverables | Exit check |
 |---|---|---|---|---|
-| **M0: Ground work** | Done 10 Oct 2026 | Identity and setup | Name and trademark check; brand v1 (section 1); licence and repo; governance basics; CI skeleton; legal review scoped | Repo public with README, licence, brand assets |
-| **M1: Engine spike** | Done on Windows 12 Oct 2026; macOS and Linux numbers by end of Oct 2026 | Prove the architecture | Core engine; wgpu renderer on three desktop platforms; `.fnm` v0 read and write; bare UI shell; benchmark scenes built | Benchmark vector scene renders at 60 fps on all three platforms; headless render works |
-| **M2: Draw** | Built 12 Oct 2026; exit check by mid-Nov 2026 | Drawing and timeline basics | Vector brush and stabiliser; shape tools; layers; timeline and keyframes; undo; autosave journal; first themes | An artist can draw, animate by keyframes, save and recover after a forced crash |
-| **M3: Rig** | Mid-Dec 2026 | The reason people use Moho | Bones, FK and IK; Smart Bones; mesh deformation; Actions panel; rig health check; PSD import | A character from a PSD is rigged and animated; 40-bone rig at 60 fps |
-| **M4: Frame-by-frame and voice** | End of Jan 2027 | Traditional animation and dialogue | X-sheet; onion skin and light table; sub-layers; Rhubarb lip sync; SVG import; video export v1 | A hand-drawn cycle and a lip-synced line are exported to MP4 |
-| **M5: Bring your files** | Public alpha by end of Mar 2027 | Migration | Moho importer; Animate importer; web build; installers for all platforms; opt-in crash reporting; first public alpha; workspaces and command palette polish | Import corpus pass rate at or above 75%; alpha installs on a clean machine |
-| **M6: Harden** | Apr to Jun 2027; 1.0 no earlier than end of Jun 2027 | Quality gate | Bug-fix freeze; public beta (at least 8 weeks); performance tuning; crash-free measurement; legal review; documentation; 1.0 release candidate | Every Gate 1 criterion in section 5 passes |
+| **M0: Ground work** | Done | Identity and setup | Name and trademark check; brand v1 (section 1); licence and repo; governance basics; CI skeleton; legal review scoped | Repo public with README, licence, brand assets |
+| **M1: Engine spike** | Done on Windows; macOS and Linux numbers wait on the reference machines | Prove the architecture | Core engine; wgpu renderer on three desktop platforms; `.fnm` v0 read and write; bare UI shell; benchmark scenes built | Benchmark vector scene renders at 60 fps on all three platforms; headless render works |
+| **M2: Draw** | Built; exit check waits on a tester | Drawing and timeline basics | Vector brush and stabiliser; shape tools; layers; timeline and keyframes; undo; autosave journal; first themes | An artist can draw, animate by keyframes, save and recover after a forced crash |
+| **M3: Rig** | Built; exit check waits on a tester | The reason people use Moho | Bones, FK and IK; Smart Bones; mesh deformation; Actions panel; rig health check; PSD import | A character from a PSD is rigged and animated; 40-bone rig at 60 fps |
+| **M4: Frame-by-frame and voice** | Built; exit check waits on a tester | Traditional animation and dialogue | X-sheet; onion skin and light table; sub-layers; Rhubarb lip sync; SVG import; video export v1 | A hand-drawn cycle and a lip-synced line are exported to MP4 |
+| **M5: Bring your files** | Built; released as the public alpha (0.1.0); corpus measurement, code signing and the clean-machine check wait on people and accounts | Migration | Moho importer; Animate importer; web build; installers and the self-updater for all platforms; opt-in crash reporting; first public alpha; workspaces and command palette polish | Import corpus pass rate at or above 75%; alpha installs on a clean machine and updates itself to the next release |
+| **M6: Harden** | About 2 to 3 months, most of it the public beta | Quality gate | Bug-fix freeze; public beta (at least 8 weeks); performance tuning; crash-free measurement; legal review; documentation; 1.0 release candidate | Every Gate 1 criterion in section 5 passes |
 
-### 4.1 Re-plan, 13 October 2026
+### 4.1 Schedule
 
-The first plan gave M0 to M2 months 0 to 5 and the whole phase about 12 months. M0 to M2 were built in four days (10 to 13 October 2026) with AI-assisted coding, and everything still open in them waits on people or hardware, not code. Writing code no longer sets the schedule. These do:
+The first plan gave M0 to M2 the first five months and the whole phase about 12 months. With AI-assisted coding, M0 to M5 were built in about a week, and everything still open in them waits on people, hardware or accounts, not code. Writing code no longer sets the schedule. These do:
 
 | Constraint | Why it takes calendar time | Gates |
 |---|---|---|
@@ -540,21 +568,21 @@ The first plan gave M0 to M2 months 0 to 5 and the whole phase about 12 months. 
 | Artists and Moho animators | The exit checks for M2 to M4, the WS7 usability session and the Gate 1 usability test need real users. No advisers are recruited yet | M2, M3, M4, M6 |
 | Reference hardware | The 60 fps budget is measured on specific machines the team needs access to | M1, M3, M6 |
 | Import test corpus | 100 Moho and 50 Animate files, each with recorded consent. None are collected yet, and the importers cannot be measured without them | M5 |
-| Legal review | External, and the video codec answer is needed before MP4 export ships | M4, M5, M6 |
-| Code signing | Apple Developer account and a Windows code-signing certificate; identity checks take days to weeks | M5 |
+| Legal review | External. The [video export note](../legal/video-export.md) asks counsel to settle the codec question before 1.0; MP4 export has shipped in the pre-releases since 0.0.6 on its low-risk reading | M6 |
+| Code signing | Apple Developer account and a Windows code-signing certificate; identity checks take days to weeks. The installers and the self-updater's signature check need them | M5 |
 | Public beta | 99.5% crash-free sessions means fewer than 1 crash in 200 sessions, which takes thousands of opt-in sessions to show. Users, crash reports and stability releases need weeks, not days | M6 |
 
-**Build estimates.** Within each target, the build itself is estimated at 2 to 3 weeks for M3, 2 to 3 weeks for M4 and 4 to 6 weeks for M5; the rest is review, exit checks with users and fixing what they find. These assume the M0 to M2 pace holds, and that is one data point on the most familiar part of the work. Rigging and the importers are harder to get right than to write: IK and Smart Bones must feel right to Moho animators, and importers are tuned against real files. M4's target includes the end-of-year holidays.
+**Build estimates.** The M5 build took about two days. The importers are the part most likely to need more work: they are tuned against real files, and only a handful of openly licensed files were available to build them; the corpus will show what is missing. The M2 to M5 exit checks run alongside the beta, and anything they find is fixed before new features.
 
 **Start now, because they are on the critical path:**
 
-1. Recruit the advisers (first 30 days, item 10). The M2 exit check needs an artist by early November, and M3 needs Moho animators for design reviews.
-2. Collect the import corpus. At least 100 Moho files with consent are needed by February 2027 for M5 to be measurable.
-3. Bring the codec part of the legal review forward (section 4 of the [review scope](../legal/review-scope.md)) so MP4 export in M4 is not blocked.
+1. Recruit the advisers (first 30 days, item 10). The M2 to M5 exit checks all need testers, and Moho animators need to judge what the importer produces.
+2. Collect the import corpus. At least 100 Moho files with consent are needed before the importers can be measured.
+3. Finish the codec part of the legal review (section 4 of the [review scope](../legal/review-scope.md)) before 1.0.
 4. Get the macOS and Linux reference machines, or access to them.
-5. Open the Apple Developer and Windows code-signing accounts by February 2027.
+5. Open the Apple Developer and Windows code-signing accounts. Identity checks can take weeks; until then the installers show the systems' unknown-publisher warnings (the updater's own signature check does not depend on them).
 
-Phase 1 is now planned at about 8 to 9 months (October 2026 to the end of June 2027) instead of 12. The saving comes from the build work; the user testing, corpus and beta time are unchanged, since they set the earliest 1.0 date. Re-plan again at the end of M3, with a second data point on build pace.
+The rest of Phase 1 is planned at about 2 to 3 months, nearly all of it M6's public beta of at least 8 weeks, with the corpus and user testing alongside. These take calendar time however fast the code is written. Re-plan a month into the beta, with the importer pass rate and the first crash numbers.
 
 **Rules for the schedule:**
 
@@ -590,6 +618,7 @@ Gate 1 is the exit from Phase 1. It is a release decision, not a date.
 | Canvas versus export | Exported frames match the on-screen canvas for the benchmark scene |
 | SVG conformance | A defined set of SVG test files imports with matching geometry, plus an import report for unsupported features |
 | Fresh install | Installers run on clean Windows 10/11, macOS 13+ and Ubuntu, Fedora and Flatpak, and open a sample project |
+| Self-update | An installed build updates to the next release on Windows, macOS and the AppImage; a corrupted or unsigned download is rejected and the installed version keeps working; with no network the app starts and works normally |
 | Accessibility | High-contrast theme and keyboard navigation work through the main workflows; contrast tests in section 1.2 pass |
 | Usability | A first-time Moho user and a first-time non-Moho user each complete the "rig a character" task; median under 30 minutes |
 | Licence audit | Every dependency and bundled font, library and model has a compatible licence recorded |
@@ -645,4 +674,4 @@ A concrete starting list, in priority order.
 
 ---
 
-*This breakdown was revisited after M1 and M2 (section 4.1). Revisit it again at the end of M3, when a second milestone's build pace and the first Smart Bones benchmark numbers show whether the targets and the milestone order still hold.*
+*This breakdown was revisited after M4 (section 4.1). Revisit it again at the public alpha, when the importer pass rate and the first crash numbers show whether the estimates and the milestone order still hold.*

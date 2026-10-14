@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fanimate</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #2b2b2b; color: #ededed;
+      font-family: system-ui, sans-serif; }
+    canvas { display: block; width: 100%; height: 100%; }
+    #message { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+      padding: 16px; text-align: center; pointer-events: none; }
+    #message:empty { display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="fanimate"></canvas>
+  <div id="message">Loading Fanimate…</div>
+  <script type="module">
+    import init from "./fanimate_web.js";
+    init().catch((e) => {
+      document.getElementById("message").textContent =
+        "Fanimate could not load in this browser. Download the desktop app from github.com/toonittmedia/fanimate.";
+      console.error(e);
+    });
+  </script>
+</body>
+</html>

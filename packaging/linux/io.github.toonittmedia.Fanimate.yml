@@ -1,0 +1,31 @@
+# Flatpak manifest. The release workflow builds a single-file bundle from
+# the already-built release folder (packaging/linux/package.sh puts it at
+# flatpak-src/), so the Flatpak holds exactly the binaries of the other
+# Linux packages. Updates come through Flatpak, not Fanimate's updater.
+app-id: io.github.toonittmedia.Fanimate
+runtime: org.gnome.Platform
+runtime-version: "47"
+sdk: org.gnome.Sdk
+command: fanimate
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --device=dri
+  - --socket=pulseaudio
+  # projects, pictures, sounds and renders live anywhere the user keeps them
+  - --filesystem=home
+modules:
+  - name: fanimate
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/lib/fanimate /app/bin
+      - cp -r fanimate fanimate-cli ffmpeg rhubarb LICENSE-MIT LICENSE-APACHE /app/lib/fanimate/
+      - ln -s /app/lib/fanimate/fanimate /app/bin/fanimate
+      - ln -s /app/lib/fanimate/fanimate-cli /app/bin/fanimate-cli
+      - install -Dm644 io.github.toonittmedia.Fanimate.desktop /app/share/applications/io.github.toonittmedia.Fanimate.desktop
+      - install -Dm644 io.github.toonittmedia.Fanimate.metainfo.xml /app/share/metainfo/io.github.toonittmedia.Fanimate.metainfo.xml
+      - install -Dm644 icon-256.png /app/share/icons/hicolor/256x256/apps/io.github.toonittmedia.Fanimate.png
+    sources:
+      - type: dir
+        path: ../../flatpak-src

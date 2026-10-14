@@ -13,7 +13,9 @@ const USAGE: &str = "\
 usage:
   fanimate-cli sample <hello|benchmark> <out.fnm> [--bones N]
   fanimate-cli validate <project.fnm> [--repair]
-  fanimate-cli render <project.fnm> -o <out.png> [--frame N] [--width W] [--height H]
+  fanimate-cli import <file.moho|.mohoproj|.fla|.xfl> -o <out.fnm>
+  fanimate-cli corpus <folder>
+  fanimate-cli render <project.fnm|file.moho|.fla|.xfl> -o <out.png> [--frame N] [--width W] [--height H]
   fanimate-cli export <project.fnm> -o <out.mp4|.mkv|.gif|.png> [--width W] [--height H]
                       [--start N] [--end N]
   fanimate-cli bench [--bones N] [--frames N] [--gpu [--width W] [--height H]]";
@@ -24,6 +26,8 @@ fn main() -> ExitCode {
     let result = match args.first().map(String::as_str) {
         Some("sample") => sample(&args[1..]),
         Some("validate") => validate(&args[1..]),
+        Some("import") => import(&args[1..]),
+        Some("corpus") => corpus(&args[1..]),
         Some("render") => render(&args[1..]),
         Some("export") => export(&args[1..]),
         Some("bench") => bench(&args[1..]),
@@ -142,10 +146,19 @@ fn render(args: &[String]) -> CmdResult {
         return Err(USAGE.into());
     };
     let out: PathBuf = a.get::<String>("-o")?.ok_or("render needs -o <out.png>")?.into();
-    let (doc, report) = fanimate_fnm::load(path).map_err(|e| e.to_string())?;
-    if !report.is_clean() {
-        eprint!("{report}");
-    }
+    let doc = if fanimate_import::can_import(path.as_ref()) {
+        let im = fanimate_import::import(path.as_ref())?;
+        for note in &im.notes {
+            eprintln!("import: {note}");
+        }
+        im.doc
+    } else {
+        let (doc, report) = fanimate_fnm::load(path).map_err(|e| e.to_string())?;
+        if !report.is_clean() {
+            eprint!("{report}");
+        }
+        doc
+    };
     let (width, height) = output_size(&doc, a.get("--width")?, a.get("--height")?);
     let frame: i32 = a.get("--frame")?.unwrap_or(doc.start);
 
@@ -163,6 +176,112 @@ fn render(args: &[String]) -> CmdResult {
         info.backend
     );
     Ok(ExitCode::SUCCESS)
+}
+
+/// Convert a Moho or Animate project to a Fanimate project, listing what
+/// did not come through exactly.
+fn import(args: &[String]) -> CmdResult {
+    let a = Args::parse(args, &["-o"])?;
+    let [path] = a.positional.as_slice() else {
+        return Err(USAGE.into());
+    };
+    let out: PathBuf = a.get::<String>("-o")?.ok_or("import needs -o <out.fnm>")?.into();
+    let mut im = fanimate_import::import(path.as_ref())?;
+    let report = fanimate_fnm::repair(&mut im.doc);
+    if !report.is_clean() {
+        eprint!("{report}");
+    }
+    fanimate_fnm::save(&im.doc, &out).map_err(|e| e.to_string())?;
+    println!(
+        "imported {} layers, {} frames at {} fps, {}x{} to {}",
+        im.doc.layer_count(),
+        im.doc.frame_count(),
+        im.doc.fps,
+        im.doc.width,
+        im.doc.height,
+        out.display()
+    );
+    for note in &im.notes {
+        println!("  {note}");
+    }
+    Ok(ExitCode::SUCCESS)
+}
+
+/// Import every Moho and Animate file under a folder and report the
+/// result of each, for measuring the importers against the test corpus
+/// (corpus/README.md). A file "imports cleanly" when it imports with no
+/// error and passes the validator with nothing left out; comparing renders
+/// with the original program's is a separate, manual step.
+fn corpus(args: &[String]) -> CmdResult {
+    let a = Args::parse(args, &[])?;
+    let [folder] = a.positional.as_slice() else {
+        return Err(USAGE.into());
+    };
+    let mut files = Vec::new();
+    collect_importable(std::path::Path::new(folder), &mut files);
+    files.sort();
+    if files.is_empty() {
+        return Err(format!("no Moho or Animate files under {folder}"));
+    }
+    let (mut clean, mut partial, mut failed) = (0, 0, 0);
+    for file in &files {
+        let started = Instant::now();
+        // an importer bug must not stop the run: count it as a failure
+        let result = std::panic::catch_unwind(|| fanimate_import::import(file))
+            .unwrap_or_else(|_| Err("the importer crashed".into()));
+        let ms = started.elapsed().as_secs_f64() * 1000.0;
+        match result {
+            Ok(mut im) => {
+                let report = fanimate_fnm::repair(&mut im.doc);
+                let errors = report.unresolved_errors().count();
+                if errors == 0 && im.notes.is_empty() {
+                    clean += 1;
+                    println!("clean    {} ({ms:.0} ms)", file.display());
+                } else {
+                    partial += 1;
+                    println!("partial  {} ({ms:.0} ms)", file.display());
+                    for note in &im.notes {
+                        println!("           {note}");
+                    }
+                    if errors > 0 {
+                        println!("           {errors} validator errors");
+                    }
+                }
+            }
+            Err(e) => {
+                failed += 1;
+                println!("failed   {}: {e}", file.display());
+            }
+        }
+    }
+    let total = files.len();
+    let pct = |n: usize| n as f64 * 100.0 / total as f64;
+    println!(
+        "
+{total} files: {clean} clean ({:.0}%), {partial} partial ({:.0}%), {failed} failed ({:.0}%)",
+        pct(clean),
+        pct(partial),
+        pct(failed)
+    );
+    Ok(if failed == 0 {
+        ExitCode::SUCCESS
+    } else {
+        ExitCode::from(1)
+    })
+}
+
+fn collect_importable(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_importable(&path, out);
+        } else if fanimate_import::can_import(&path) {
+            out.push(path);
+        }
+    }
 }
 
 /// Export frames as video (through FFmpeg), an animated GIF or a PNG

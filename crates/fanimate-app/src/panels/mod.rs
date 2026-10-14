@@ -104,6 +104,19 @@ impl egui_dock::TabViewer for TabViewer<'_> {
     }
 }
 
+/// The status bar's update button, while an update waits.
+fn update_label(shell: &Shell) -> Option<String> {
+    use crate::update::State;
+    match shell.updater.state() {
+        State::Available(r) if shell.updates.skipped.as_deref() != Some(&r.version.to_string()) => {
+            Some(format!("Update to {}", r.version))
+        }
+        State::Downloading(r) => Some(format!("Downloading {}", r.version)),
+        State::Ready(r, _) => Some(format!("Restart to update to {}", r.version)),
+        _ => None,
+    }
+}
+
 /// Bottom bar: messages or the tool hint on the left, state on the right.
 pub fn status_bar(ui: &mut egui::Ui, shell: &mut Shell) {
     // expire messages after a few seconds
@@ -147,6 +160,14 @@ pub fn status_bar(ui: &mut egui::Ui, shell: &mut Shell) {
                 // with an ellipsis instead of running under it
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let muted = |s: String| RichText::new(s).size(12.0).color(p.text_muted);
+                    if let Some(label) = update_label(shell) {
+                        let button = egui::Button::new(RichText::new(label).size(12.0).color(p.on_button))
+                            .fill(p.button);
+                        if ui.add(button).clicked() {
+                            shell.ui.show_update = true;
+                        }
+                        ui.separator();
+                    }
                     ui.label(muted(shell.gpu_name.clone()));
                     ui.separator();
                     let keyboard = icons::image(ui.ctx(), Icon::Keyboard, 14.0, p.text_muted);

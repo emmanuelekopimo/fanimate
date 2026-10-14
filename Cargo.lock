@@ -968,6 +968,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "ed25519-compact"
+version = "2.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1454db4f2edb7f0e8fe0c5b375b0c978fc63244cc9f010d160e417eb10139aa8"
+
+[[package]]
 name = "eframe"
 version = "0.36.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1260,6 +1266,7 @@ name = "fanimate-app"
 version = "0.0.7"
 dependencies = [
  "cpal",
+ "ed25519-compact",
  "eframe",
  "egui_dock",
  "env_logger",
@@ -1267,6 +1274,7 @@ dependencies = [
  "fanimate-editor",
  "fanimate-export",
  "fanimate-fnm",
+ "fanimate-import",
  "fanimate-render",
  "hound",
  "image",
@@ -1288,6 +1296,7 @@ dependencies = [
  "fanimate-core",
  "fanimate-export",
  "fanimate-fnm",
+ "fanimate-import",
  "fanimate-render",
  "image",
 ]
@@ -1308,6 +1317,7 @@ version = "0.0.7"
 dependencies = [
  "fanimate-core",
  "fanimate-fnm",
+ "fanimate-import",
  "hound",
  "image",
  "psd",
@@ -1342,6 +1352,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "fanimate-import"
+version = "0.0.7"
+dependencies = [
+ "fanimate-core",
+ "image",
+ "miniz_oxide 0.8.9",
+ "roxmltree",
+ "serde_json",
+]
+
+[[package]]
 name = "fanimate-render"
 version = "0.0.7"
 dependencies = [
@@ -1352,6 +1373,24 @@ dependencies = [
  "lyon",
  "pollster 1.0.1",
  "thiserror 2.0.21",
+ "wgpu",
+]
+
+[[package]]
+name = "fanimate-web"
+version = "0.0.7"
+dependencies = [
+ "eframe",
+ "fanimate-core",
+ "fanimate-fnm",
+ "fanimate-import",
+ "fanimate-render",
+ "log",
+ "rfd",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
  "wgpu",
 ]
 

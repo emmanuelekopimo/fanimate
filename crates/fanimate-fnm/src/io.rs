@@ -65,14 +65,31 @@ pub fn load_and_repair(path: impl AsRef<Path>) -> Result<(Document, Report)> {
     Ok((doc, report))
 }
 
+/// Load a project from somewhere other than a folder on disk, such as a
+/// ZIP archive or a browser upload: `files` reads a file by its path inside
+/// the project folder (`manifest.json`, `layers/0001.json`, ...). `name` is
+/// used in error messages. Validated, and repaired where that is safe.
+pub fn load_from(name: &str, files: &dyn Fn(&str) -> std::io::Result<Vec<u8>>) -> Result<(Document, Report)> {
+    let mut doc = read_from(Path::new(name), files)?;
+    let report = validate::repair(&mut doc);
+    Ok((doc, report))
+}
+
 fn read(dir: &Path) -> Result<Document> {
-    let manifest_path = dir.join("manifest.json");
-    if !manifest_path.is_file() {
+    if !dir.join("manifest.json").is_file() {
         return Err(FnmError::NotFnm(dir.to_path_buf()));
     }
-    let manifest: Manifest = read_json(&manifest_path)?;
+    read_from(dir, &|rel| fs::read(dir.join(rel)))
+}
+
+fn read_from(base: &Path, files: &dyn Fn(&str) -> std::io::Result<Vec<u8>>) -> Result<Document> {
+    let json = |rel: &str| -> Result<Vec<u8>> { files(rel).map_err(|e| io_err(&base.join(rel), e)) };
+    let manifest: Manifest = match files("manifest.json") {
+        Ok(bytes) => parse_json(&base.join("manifest.json"), &bytes)?,
+        Err(_) => return Err(FnmError::NotFnm(base.to_path_buf())),
+    };
     if manifest.format != FORMAT_NAME {
-        return Err(FnmError::NotFnm(dir.to_path_buf()));
+        return Err(FnmError::NotFnm(base.to_path_buf()));
     }
     if manifest.version > FORMAT_VERSION {
         return Err(FnmError::UnsupportedVersion {
@@ -81,11 +98,11 @@ fn read(dir: &Path) -> Result<Document> {
         });
     }
 
-    let file: DocumentFile = read_json(&dir.join("document.json"))?;
+    let file: DocumentFile = parse_json(&base.join("document.json"), &json("document.json")?)?;
     let layers = file
         .layers
         .iter()
-        .map(|rel| read_json::<Layer>(&dir.join(rel)))
+        .map(|rel| parse_json::<Layer>(&base.join(rel), &json(rel)?))
         .collect::<Result<Vec<_>>>()?;
 
     let mut doc = Document {
@@ -104,7 +121,7 @@ fn read(dir: &Path) -> Result<Document> {
     // pictures used by image layers; a missing one is reported by the
     // validator and drawn as a grey placeholder, never a failed load
     for name in media_names(&doc) {
-        if let Ok(bytes) = fs::read(dir.join(&name)) {
+        if let Ok(bytes) = files(&name) {
             doc.media.insert(name, Arc::new(MediaFile { bytes }));
         }
     }
@@ -248,9 +265,8 @@ fn sibling(path: &Path, tag: &str) -> PathBuf {
     path.with_file_name(format!(".{name}.{tag}"))
 }
 
-fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
-    let text = fs::read_to_string(path).map_err(|e| io_err(path, e))?;
-    serde_json::from_str(&text).map_err(|source| FnmError::Json {
+fn parse_json<T: for<'de> Deserialize<'de>>(path: &Path, bytes: &[u8]) -> Result<T> {
+    serde_json::from_slice(bytes).map_err(|source| FnmError::Json {
         path: path.to_path_buf(),
         source,
     })
@@ -283,6 +299,35 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn a_project_loads_from_files_in_memory() {
+        let dir = temp_dir("from-memory");
+        let path = dir.join("hello.fnm");
+        let doc = samples::hello();
+        save(&doc, &path).unwrap();
+        let read = |rel: &str| fs::read(path.join(rel));
+        let (loaded, report) = load_from("hello.fnm", &read).unwrap();
+        assert_eq!(loaded, doc);
+        assert!(report.is_clean(), "{report}");
+        // no manifest: not a project; a missing layer: an error naming it
+        let none = |_: &str| -> std::io::Result<Vec<u8>> { Err(std::io::ErrorKind::NotFound.into()) };
+        assert!(matches!(load_from("x", &none), Err(FnmError::NotFnm(_))));
+        let partial = |rel: &str| {
+            if rel.starts_with("layers/") {
+                Err(std::io::ErrorKind::NotFound.into())
+            } else {
+                fs::read(path.join(rel))
+            }
+        };
+        assert!(
+            load_from("x", &partial)
+                .unwrap_err()
+                .to_string()
+                .contains("layers")
+        );
+        fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

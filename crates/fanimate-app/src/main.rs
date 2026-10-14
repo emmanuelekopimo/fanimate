@@ -20,6 +20,7 @@
 mod app;
 mod audio;
 mod canvas_gpu;
+mod crash;
 mod dialogs;
 mod export;
 mod icons;
@@ -30,6 +31,7 @@ mod recovery;
 mod render_queue;
 mod theme;
 mod titlebar;
+mod update;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -136,6 +138,7 @@ fn main() -> eframe::Result {
             std::process::exit(2);
         }
     };
+    crash::install_hook();
     if args.render_queue {
         return render_queue::run(args.theme.unwrap_or_default());
     }

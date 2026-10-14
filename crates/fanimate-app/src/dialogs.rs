@@ -1,5 +1,6 @@
 //! Dialogs: first-run welcome, preferences, shortcut list, about, the
-//! "save changes?" prompt, and the command palette.
+//! "save changes?" prompt, the command palette, reporting a crash and
+//! updating Fanimate.
 
 use eframe::egui::{self, Id, Key, RichText};
 use fanimate_editor::{Action, KeymapKind};
@@ -11,12 +12,19 @@ use crate::theme::Theme;
 pub struct PaletteState {
     query: String,
     selected: usize,
+    /// The search field has had focus; it asks once, when the palette opens.
+    focused: bool,
 }
 
 pub fn show(ctx: &egui::Context, shell: &mut Shell) {
     // recovering work after a crash comes before everything else
     if !shell.recovery.offered.is_empty() {
         crate::recovery::dialog(ctx, shell);
+        return;
+    }
+    // then the crash that lost it, if the user wants to report it
+    if shell.crash.is_some() {
+        crash(ctx, shell);
         return;
     }
     if shell.ui.show_welcome {
@@ -37,6 +45,146 @@ pub fn show(ctx: &egui::Context, shell: &mut Shell) {
     if shell.ui.show_about {
         about(ctx, shell);
     }
+    if shell.ui.show_update {
+        update(ctx, shell);
+    }
+}
+
+fn primary(shell: &Shell, text: &str) -> egui::Button<'static> {
+    egui::Button::new(RichText::new(text.to_owned()).color(shell.palette.on_button))
+        .fill(shell.palette.button)
+}
+
+/// "Fanimate closed unexpectedly": report the crash, or not.
+fn crash(ctx: &egui::Context, shell: &mut Shell) {
+    let Some(pending) = &shell.crash else { return };
+    let muted = shell.palette.text_muted;
+    let mut report = false;
+    let mut close = false;
+    let mut ask = shell.crash_reports;
+    egui::Modal::new(Id::new("crash-report")).show(ctx, |ui| {
+        ui.set_width(460.0);
+        ui.label(RichText::new("Fanimate closed unexpectedly").size(16.0).strong());
+        ui.label(
+            RichText::new(
+                "Reporting the crash helps fix it. Fanimate opens a new issue on GitHub with the report \
+                 filled in, for you to read and send. Nothing is sent unless you send it.",
+            )
+            .color(muted),
+        );
+        ui.add_space(6.0);
+        egui::CollapsingHeader::new("Show the report").show(ui, |ui| {
+            egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
+                let mut text = pending.text.as_str();
+                ui.add(
+                    egui::TextEdit::multiline(&mut text)
+                        .code_editor()
+                        .desired_width(f32::INFINITY),
+                );
+            });
+        });
+        ui.add_space(6.0);
+        ui.checkbox(&mut ask, "Offer to report crashes");
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            if ui.add(primary(shell, "Report on GitHub…")).clicked() {
+                report = true;
+            }
+            if ui.button("Don't report").clicked() {
+                close = true;
+            }
+        });
+    });
+    shell.crash_reports = ask;
+    if report {
+        ctx.open_url(egui::OpenUrl::new_tab(crate::crash::issue_url(pending)));
+    }
+    if (report || close)
+        && let Some(p) = shell.crash.take()
+    {
+        crate::crash::dismiss(&p);
+    }
+}
+
+/// The Update Fanimate window.
+fn update(ctx: &egui::Context, shell: &mut Shell) {
+    use crate::update::{Install, State, Version};
+    let state = shell.updater.state();
+    let muted = shell.palette.text_muted;
+    let mut open = true;
+    let mut close = false;
+    egui::Window::new("Update Fanimate")
+        .open(&mut open)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .collapsible(false)
+        .resizable(false)
+        .default_width(380.0)
+        .show(ctx, |ui| match &state {
+            State::Idle | State::Checking { .. } | State::UpToDate | State::Failed(_) => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label("Checking for updates…");
+                });
+            }
+            State::Available(r) => {
+                ui.label(RichText::new(format!("Fanimate {} is available", r.version)).strong());
+                ui.label(RichText::new(format!("You have version {}.", Version::current())).color(muted));
+                ui.hyperlink_to("What's new", &r.page);
+                ui.add_space(6.0);
+                match (&r.file, &shell.install) {
+                    (Some(_), _) => {
+                        ui.horizontal(|ui| {
+                            if ui.add(primary(shell, "Download")).clicked()
+                                && let Some(dir) = eframe::storage_dir("Fanimate")
+                            {
+                                shell.updater.download(r.clone(), dir.join("updates"));
+                            }
+                            if ui.button("Skip this version").clicked() {
+                                shell.updates.skipped = Some(r.version.to_string());
+                                shell.updater.reset();
+                                close = true;
+                            }
+                        });
+                    }
+                    (None, Install::Managed) => {
+                        ui.label(
+                            RichText::new("Update Fanimate through your system's software centre.")
+                                .color(muted),
+                        );
+                    }
+                    (None, _) => {
+                        ui.label(
+                            RichText::new(
+                                "This copy of Fanimate cannot update itself. Download the new version:",
+                            )
+                            .color(muted),
+                        );
+                        ui.hyperlink_to("Fanimate releases", crate::update::DOWNLOAD_PAGE);
+                    }
+                }
+            }
+            State::Downloading(r) => {
+                ui.horizontal(|ui| {
+                    ui.spinner();
+                    ui.label(format!("Downloading and checking Fanimate {}…", r.version));
+                });
+            }
+            State::Ready(r, _) => {
+                ui.label(RichText::new(format!("Fanimate {} is ready to install", r.version)).strong());
+                ui.label(
+                    RichText::new(
+                        "Fanimate closes to install it and opens again. You are asked to save changes first.",
+                    )
+                    .color(muted),
+                );
+                ui.add_space(6.0);
+                if ui.add(primary(shell, "Restart and Update")).clicked() {
+                    shell.pending.push(Action::InstallUpdate);
+                    close = true;
+                }
+            }
+        });
+    shell.ui.show_update = open && !close;
 }
 
 fn keymap_choice(ui: &mut egui::Ui, shell: &mut Shell) {
@@ -104,6 +252,9 @@ fn welcome(ctx: &egui::Context, shell: &mut Shell) {
         ui.add_space(6.0);
         ui.label(RichText::new("Theme").strong());
         theme_choice(ui, shell);
+        ui.add_space(6.0);
+        ui.checkbox(&mut shell.updates.check, "Check for updates automatically")
+            .on_hover_text("Fanimate asks before downloading or installing anything");
         ui.add_space(10.0);
         ui.vertical_centered(|ui| {
             if ui
@@ -175,15 +326,9 @@ fn palette(ctx: &egui::Context, shell: &mut Shell) {
     let Some(state) = shell.ui.palette.as_mut() else {
         return;
     };
-    let query = state.query.to_lowercase();
-    let matches: Vec<Action> = Action::all()
-        .into_iter()
-        .filter(|a| {
-            query
-                .split_whitespace()
-                .all(|w| a.label().to_lowercase().contains(w))
-        })
-        .collect();
+    let mut matches = fanimate_editor::search(&Action::all(), &state.query, &shell.recent_actions);
+    // what can run now comes first, keeping the search order otherwise
+    matches.sort_by_key(|a| !shell.editor.can_run(*a));
     state.selected = state.selected.min(matches.len().saturating_sub(1));
 
     let (up, down, enter, escape) = ctx.input(|i| {
@@ -210,7 +355,13 @@ fn palette(ctx: &egui::Context, shell: &mut Shell) {
                 .hint_text("Type a command…")
                 .desired_width(f32::INFINITY),
         );
-        edit.request_focus();
+        if !state.focused {
+            edit.request_focus();
+            state.focused = true;
+        }
+        if edit.changed() {
+            state.selected = 0;
+        }
         let selected = state.selected;
         ui.add_space(4.0);
         egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
@@ -246,6 +397,10 @@ fn palette(ctx: &egui::Context, shell: &mut Shell) {
     }
     if let Some(a) = run {
         shell.pending.push(a);
+        // most recent first, a few kept
+        shell.recent_actions.retain(|r| *r != a);
+        shell.recent_actions.insert(0, a);
+        shell.recent_actions.truncate(8);
     }
 }
 
@@ -265,6 +420,14 @@ fn preferences(ctx: &egui::Context, shell: &mut Shell) {
             ui.add_space(8.0);
             ui.label(RichText::new("Theme").strong());
             theme_choice(ui, shell);
+            ui.add_space(8.0);
+            ui.label(RichText::new("Updates and crashes").strong());
+            ui.checkbox(&mut shell.updates.check, "Check for updates automatically")
+                .on_hover_text("Turn off to stay on this version, for example during a production");
+            if ui.button("Check now").clicked() {
+                shell.pending.push(Action::CheckForUpdates);
+            }
+            ui.checkbox(&mut shell.crash_reports, "After a crash, offer to report it");
         });
     shell.ui.show_preferences = open;
 }

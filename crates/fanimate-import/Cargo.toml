@@ -1,0 +1,19 @@
+[package]
+name = "fanimate-import"
+description = "Importers for other animation apps' projects: Moho (.moho, .mohoproj) and Adobe Animate (.fla, .xfl)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+fanimate-core.workspace = true
+serde_json.workspace = true
+image.workspace = true
+miniz_oxide = "0.8"
+roxmltree = "0.21"
+
+[lints]
+workspace = true

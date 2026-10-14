@@ -14,7 +14,11 @@ Open-source 2D character animation. Rig it. Draw it. Move it.</p>
 
 Fanimate is a free, open-source 2D character animation app. It keeps what animators love about Moho Pro (bone rigging, Smart Bones, vector puppets), fixes the problems that push people away from it, and adds the best tools from Toon Boom Harmony and Adobe Animate.
 
-> **Status: Phase 1, milestone M2 (Draw) in progress.** The core engine, GPU renderer, `.fnm` file format and the app's interface work: you can draw with a pressure-sensitive brush, add rectangles and ellipses, erase, fill and edit points, organise layers, animate them on the timeline, and get unsaved work back after a crash. Bone tools are not built yet (milestone M3), so Fanimate is not ready for real work. Progress is tracked in the [Phase 1 plan](docs/roadmap/phase-1.md#status).
+> **Status: public alpha (Phase 1, milestone M5).** You can draw and animate vector shapes, rig characters with bones, IK, Smart Bones and actions, animate frame by frame with onion skin and the X-sheet, lip sync dialogue, import Moho, Animate, Photoshop and SVG files, and export video, and you get unsaved work back after a crash. Installers update themselves. It is an alpha: expect rough edges, keep backups, and please [report what goes wrong](https://github.com/toonittmedia/fanimate/issues).
+
+## Download
+
+Installers for Windows, macOS and Linux, and a browser build, are on the [releases page](https://github.com/toonittmedia/fanimate/releases). See [Installing and updating](docs/install.md); the builds are not code-signed yet, so the first start needs one extra click. Progress is tracked in the [Phase 1 plan](docs/roadmap/phase-1.md#status).
 
 ## Try it
 
@@ -57,6 +61,11 @@ cargo run --release -p fanimate-cli -- validate hello.fnm
 |---|---|
 | [Product vision](docs/product-vision.md) | The problem, principles, full feature specification, AI, business model, roadmap and risks |
 | [Phase 1: Foundation](docs/roadmap/phase-1.md) | Status, branding, scope, workstreams, milestones and Gate 1 acceptance tests for version 1.0 |
+| [User manual](docs/manual/README.md) | How to use Fanimate, chapter by chapter |
+| [Installing and updating](docs/install.md) | Installers, updates and crash reports |
+| [Importing](docs/import.md) | What comes through from Moho and Animate projects |
+| [Fanimate in the browser](docs/web.md) | The web build and its limits |
+| [Architecture](docs/architecture.md) | How the crates fit together |
 | [`.fnm` format specification](docs/spec/fnm.md) | The open project file format |
 | [Legal review scope](docs/legal/review-scope.md) | Questions for the legal review required before 1.0 |
 | [Brand guidelines](brand/README.md) | Logo, colours, themes, typography and how to rebuild the assets |
@@ -67,7 +76,7 @@ cargo run --release -p fanimate-cli -- validate hello.fnm
 
 | Phase | Duration (estimate) | Focus | Ends at |
 |---|---|---|---|
-| **1. Foundation** | About 12 months | Engine and renderer, drawing and frame-by-frame, rigging, lip sync, SVG, PSD, Moho and Animate import, video export | **Version 1.0** |
+| **1. Foundation** | About 2 to 3 more months (M0 to M5 are built; the public beta remains) | Engine and renderer, drawing and frame-by-frame, rigging, lip sync, SVG, PSD, Moho and Animate import, video export | **Version 1.0** |
 | 2. Production | About 6 months | Node graph, text animation, auto colour fill, raster brushes, scripting API, local AI tools, Lottie and game export | A pilot short film ships |
 | 3. Studio | About 6 months | Fanimate Hub, review and approvals, cloud rendering, marketplace | Studio-ready |
 | 4. Reach | Ongoing | Tablet apps, live co-editing, Harmony import, education | — |

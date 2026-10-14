@@ -191,6 +191,36 @@ impl Editor {
         Ok((ed, report))
     }
 
+    /// Open a Moho or Animate project as a new, unsaved Fanimate project.
+    /// The status says what did not come through exactly.
+    pub fn import_project(path: &Path) -> Result<Self, String> {
+        let mut im = fanimate_import::import(path)?;
+        fanimate_fnm::repair(&mut im.doc);
+        im.doc.walk_mut(|l| {
+            if l.label.is_none() {
+                l.label = Some(Label::for_id(l.id));
+            }
+        });
+        let mut ed = Self::new(im.doc);
+        ed.dirty = true;
+        let file = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |f| f.to_string_lossy().into_owned(),
+        );
+        if im.notes.is_empty() {
+            ed.set_status(
+                StatusKind::Success,
+                format!("Imported {file}. Save to keep it as a Fanimate project."),
+            );
+        } else {
+            ed.set_status(
+                StatusKind::Warning,
+                format!("Imported {file}; {}. Save to keep it.", im.notes.join("; ")),
+            );
+        }
+        Ok(ed)
+    }
+
     /// Adopt work recovered after a crash. It is unsaved until saved
     /// again, to `path` if it had been saved before.
     /// Its undo history comes back too, when the journal kept it.
@@ -358,9 +388,10 @@ impl Editor {
                 use crate::action::Tool as T;
                 self.set_tool(if bone { T::AddBone } else { T::AddPoint });
             }
-            New | Open | OpenSample(_) | Save | SaveAs | Import | ExportVideo | RenderQueue | LipSync
-            | Quit | ToggleOnionSkin | ToggleLightTable | Preferences | CommandPalette | LayerProperties
-            | ZoomIn | ZoomOut | FitView | ActualSize => return Outcome::App(action),
+            New | Open | OpenOther | OpenSample(_) | Save | SaveAs | Import | ExportVideo | RenderQueue
+            | LipSync | CheckForUpdates | InstallUpdate | Workspace(_) | Quit | ToggleOnionSkin
+            | ToggleLightTable | Preferences | CommandPalette | LayerProperties | ZoomIn | ZoomOut
+            | FitView | ActualSize => return Outcome::App(action),
         }
         Outcome::Done
     }
@@ -1734,5 +1765,51 @@ mod tests {
         ed.run(Action::Copy);
         assert!(ed.can_run(Action::Paste));
         assert!(!ed.can_run(Action::Ungroup));
+    }
+
+    #[test]
+    fn importing_a_moho_project_opens_it_unsaved_with_a_report() {
+        let dir = std::env::temp_dir().join(format!("fanimate-import-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("Walk.mohoproj");
+        let json = r#"{"project_data": {"width": 320, "height": 240, "fps": 30.0, "start_frame": 1, "end_frame": 10},
+            "layers": [{"type": "GroupLayer", "name": "Body", "layers": []}, {"type": "TextLayer", "name": "Title"}]}"#;
+        std::fs::write(&file, json).unwrap();
+        let ed = Editor::import_project(&file).unwrap();
+        assert!(ed.dirty && ed.path.is_none());
+        assert_eq!(
+            (ed.doc.name.as_str(), ed.doc.width, ed.doc.fps),
+            ("Walk", 320.0, 30.0)
+        );
+        assert!(ed.doc.layers[0].label.is_some());
+        let (kind, msg) = ed.status.clone().unwrap();
+        assert_eq!(kind, StatusKind::Warning);
+        assert!(msg.contains("1 text layer left out"), "{msg}");
+        // a damaged file is an error, not a panic
+        std::fs::write(&file, "{").unwrap();
+        assert!(Editor::import_project(&file).is_err());
+        assert!(Editor::import_project(&dir.join("missing.fla")).is_err());
+        std::fs::remove_dir_all(&dir).ok();
+        assert!(Action::OpenOther.closes_document());
+    }
+
+    #[test]
+    fn palette_search_ranks_and_remembers() {
+        use crate::action::search;
+        let all = Action::all();
+        let first = |q: &str, recent: &[Action]| search(&all, q, recent).first().copied();
+        // a label that starts with the query wins
+        assert_eq!(first("undo", &[]), Some(Action::Undo));
+        // word starts, in any order
+        assert_eq!(first("layer vector", &[]), Some(Action::NewVectorLayer));
+        // letters in order
+        assert!(search(&all, "nvl", &[]).contains(&Action::NewVectorLayer));
+        assert!(search(&all, "zzzz", &[]).is_empty());
+        // recently used leads among equals, and fills an empty query
+        let recent = [Action::Redo];
+        assert_eq!(first("", &recent), Some(Action::Redo));
+        assert_eq!(search(&all, "", &[]).len(), all.len());
+        let workspaces = search(&all, "workspace", &[]);
+        assert_eq!(workspaces.len(), crate::Workspace::ALL.len());
     }
 }

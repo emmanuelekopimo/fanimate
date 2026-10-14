@@ -7,6 +7,8 @@ pub enum Action {
     // File
     New,
     Open,
+    /// Open a Moho or Adobe Animate project as a new Fanimate project.
+    OpenOther,
     OpenSample(Sample),
     Save,
     SaveAs,
@@ -16,6 +18,12 @@ pub enum Action {
     ExportVideo,
     /// Show the render queue window.
     RenderQueue,
+    /// Look for a newer version of Fanimate now.
+    CheckForUpdates,
+    /// Install a downloaded update and restart.
+    InstallUpdate,
+    /// Arrange the panels for a kind of work.
+    Workspace(Workspace),
     Quit,
     // Edit
     Undo,
@@ -112,6 +120,7 @@ impl Action {
         match self {
             New => "New",
             Open => "Open…",
+            OpenOther => "Open Moho or Animate Project…",
             OpenSample(Sample::Hello) => "Open Sample: Hello Fanimate",
             OpenSample(Sample::Benchmark) => "Open Sample: Benchmark Rig",
             OpenSample(Sample::StressTest) => "Open Sample: Stress Test",
@@ -120,6 +129,9 @@ impl Action {
             Import => "Import…",
             ExportVideo => "Export Video…",
             RenderQueue => "Render Queue",
+            CheckForUpdates => "Check for Updates",
+            InstallUpdate => "Install Update and Restart",
+            Workspace(w) => w.label(),
             Quit => "Quit",
             Undo => "Undo",
             Redo => "Redo",
@@ -200,11 +212,14 @@ impl Action {
         let mut v = vec![
             New,
             Open,
+            OpenOther,
             Save,
             SaveAs,
             Import,
             ExportVideo,
             RenderQueue,
+            CheckForUpdates,
+            InstallUpdate,
             Quit,
             Undo,
             Redo,
@@ -261,6 +276,7 @@ impl Action {
         v.extend(fanimate_core::Interpolation::ALL.map(SetInterpolation));
         v.extend(fanimate_core::Part::ALL.map(SetPart));
         v.extend(Sample::ALL.iter().map(|s| OpenSample(*s)));
+        v.extend(self::Workspace::ALL.map(Action::Workspace));
         v.extend(crate::action::Tool::ALL.iter().map(|t| Tool(*t)));
         v
     }
@@ -268,8 +284,91 @@ impl Action {
     /// Whether the action closes the open document, so unsaved changes must
     /// be saved or discarded first.
     pub fn closes_document(self) -> bool {
-        matches!(self, Self::New | Self::Open | Self::OpenSample(_) | Self::Quit)
+        matches!(
+            self,
+            Self::New | Self::Open | Self::OpenOther | Self::OpenSample(_) | Self::InstallUpdate | Self::Quit
+        )
     }
+}
+
+/// Panel arrangements for kinds of work, in Window › Workspace.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Workspace {
+    /// Everything: tools, canvas, timeline, properties and layers.
+    Animate,
+    /// A large canvas with the Style panel at hand and a short timeline.
+    Draw,
+    /// Properties and Actions forward, for bones and Smart Bones.
+    Rig,
+    /// The X-sheet beside a tall timeline, for drawn animation.
+    FrameByFrame,
+    /// The canvas and the timeline only, for watching and checking.
+    Review,
+}
+
+impl Workspace {
+    pub const ALL: [Workspace; 5] = [
+        Self::Animate,
+        Self::Draw,
+        Self::Rig,
+        Self::FrameByFrame,
+        Self::Review,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Animate => "Workspace: Animate",
+            Self::Draw => "Workspace: Draw",
+            Self::Rig => "Workspace: Rig",
+            Self::FrameByFrame => "Workspace: Frame by Frame",
+            Self::Review => "Workspace: Review",
+        }
+    }
+
+    /// The name in the Window › Workspace menu.
+    pub fn name(self) -> &'static str {
+        self.label().trim_start_matches("Workspace: ")
+    }
+}
+
+/// Command palette search: the actions whose labels match `query`, best
+/// first. A label that starts with the query comes first, then labels
+/// with a word starting with each query word, then ones containing every
+/// word, then ones holding the query's letters in order ("nvl" finds New
+/// Vector Layer). Within each, recently used actions (`recent`, most recent
+/// first) lead. An empty query lists the recent actions, then the rest.
+pub fn search(all: &[Action], query: &str, recent: &[Action]) -> Vec<Action> {
+    let query = query.trim().to_lowercase();
+    let words: Vec<&str> = query.split_whitespace().collect();
+    let rank = |a: &Action| -> Option<u8> {
+        if words.is_empty() {
+            return Some(0);
+        }
+        let label = a.label().to_lowercase();
+        let label_words: Vec<&str> = label
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|w| !w.is_empty())
+            .collect();
+        if label.starts_with(&query) {
+            Some(0)
+        } else if words.iter().all(|q| label_words.iter().any(|w| w.starts_with(q))) {
+            Some(1)
+        } else if words.iter().all(|q| label.contains(q)) {
+            Some(2)
+        } else {
+            let mut letters = label.chars();
+            let compact: String = query.chars().filter(|c| !c.is_whitespace()).collect();
+            compact.chars().all(|q| letters.any(|c| c == q)).then_some(3)
+        }
+    };
+    let recency = |a: &Action| recent.iter().position(|r| r == a).unwrap_or(usize::MAX);
+    let mut found: Vec<(u8, usize, usize, Action)> = all
+        .iter()
+        .enumerate()
+        .filter_map(|(i, a)| rank(a).map(|r| (r, recency(a), i, *a)))
+        .collect();
+    found.sort_by_key(|f| (f.0, f.1, f.2));
+    found.into_iter().map(|(.., a)| a).collect()
 }
 
 /// The sample projects in File › Open Sample.

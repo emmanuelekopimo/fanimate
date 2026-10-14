@@ -6,8 +6,10 @@ members = [
     "crates/fanimate-editor",
     "crates/fanimate-render",
     "crates/fanimate-export",
+    "crates/fanimate-import",
     "crates/fanimate-app",
     "crates/fanimate-cli",
+    "crates/fanimate-web",
 ]
 default-members = [
     "crates/fanimate-core",
@@ -15,6 +17,7 @@ default-members = [
     "crates/fanimate-editor",
     "crates/fanimate-render",
     "crates/fanimate-export",
+    "crates/fanimate-import",
     "crates/fanimate-app",
     "crates/fanimate-cli",
 ]
@@ -34,6 +37,7 @@ fanimate-fnm = { path = "crates/fanimate-fnm" }
 fanimate-render = { path = "crates/fanimate-render" }
 fanimate-editor = { path = "crates/fanimate-editor" }
 fanimate-export = { path = "crates/fanimate-export" }
+fanimate-import = { path = "crates/fanimate-import" }
 
 bytemuck = { version = "1.25", features = ["derive"] }
 glam = { version = "0.34", features = ["serde"] }
@@ -61,7 +65,9 @@ all = { level = "warn", priority = -1 }
 
 [profile.dev.package."*"]
 # Dependencies (wgpu, lyon) are slow unoptimised; our own code stays debuggable.
+# Without debug info for them, a debug build takes a few GB less disk.
 opt-level = 2
+debug = false
 
 [profile.release]
 lto = "thin"

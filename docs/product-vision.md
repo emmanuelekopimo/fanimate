@@ -393,7 +393,7 @@ Fanimate ships in four phases, each gated by a quality bar rather than a date, s
 
 | Phase | Duration | Scope | Exit gate |
 |---|---|---|---|
-| **1. Foundation** | About 12 months | Engine and renderer; drawing and frame-by-frame; rigging and lip sync; SVG and PSD import; Moho and FLA import; video export; Windows, macOS, Linux and web | **Gate 1: version 1.0** <br> Performance budget met <br> 99.5% crash-free beta <br> 90% of test Moho files open |
+| **1. Foundation** | First planned at about 12 months; M0 to M5 took about a week, and about 2 to 3 more remain, mostly the public beta (see the [Phase 1 schedule](roadmap/phase-1.md#41-schedule)) | Engine and renderer; drawing and frame-by-frame; rigging and lip sync; SVG and PSD import; Moho and FLA import; video export; Windows, macOS, Linux and web | **Gate 1: version 1.0** <br> Performance budget met <br> 99.5% crash-free beta <br> 90% of test Moho files open |
 | **2. Production** | About 6 months | Node graph; text animators; auto colour fill; raster brushes; scripting API; local AI tools; Lottie and game export | **Gate 2: production** <br> A pilot short film ships <br> Scripting API frozen |
 | **3. Studio** | About 6 months | Fanimate Hub; review and approvals; cloud render; marketplace; cloud AI credits | **Gate 3: studio-ready** <br> Studio pilots on Hub <br> Plugin sandbox audited |
 | **4. Reach** | Ongoing | Tablet apps; live co-editing; Harmony import; education and certification | — |

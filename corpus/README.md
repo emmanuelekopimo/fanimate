@@ -1,6 +1,6 @@
 # Import test corpus
 
-Real files from Moho, Adobe Animate, SVG editors and Photoshop, used to test Fanimate's importers. The Gate 1 target is that **90% of the Moho corpus opens** ([Phase 1 plan, section 5.3](../docs/roadmap/phase-1.md#53-the-test-corpus)). The importers arrive later (PSD in M3, SVG in M4, Moho and Animate in M5); collecting starts now because it costs nothing and takes time.
+Real files from Moho, Adobe Animate, SVG editors and Photoshop, used to test Fanimate's importers. The Gate 1 target is that **90% of the Moho corpus opens** ([Phase 1 plan, section 5.3](../docs/roadmap/phase-1.md#53-the-test-corpus)). The PSD (M3), SVG (M4), Moho and Animate (M5) importers are built; the corpus is what measures them. `fanimate-cli corpus corpus/moho` imports every file under a folder and reports each one (see [docs/import.md](../docs/import.md)).
 
 ## What goes here
 

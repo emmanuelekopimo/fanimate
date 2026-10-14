@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Fanimate
+GenericName=2D Animation
+Comment=Free 2D character animation with bones, drawing and lip sync
+Exec=fanimate %f
+Icon=io.github.toonittmedia.Fanimate
+Terminal=false
+Categories=Graphics;2DGraphics;VectorGraphics;AudioVideo;
+Keywords=animation;rigging;bones;cartoon;moho;
+StartupWMClass=fanimate

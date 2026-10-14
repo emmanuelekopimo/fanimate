@@ -11,7 +11,7 @@ mod editor;
 mod history;
 mod keymap;
 
-pub use action::{Action, Sample, Tool, ToolGroup};
+pub use action::{Action, Sample, Tool, ToolGroup, Workspace, search};
 pub use editor::{
     BoneRef, DrawStyle, Editor, MouthCue, Outcome, Placement, PointRef, SelectMode, SoundInfo, StatusKind,
     parse_rhubarb, sound_info,

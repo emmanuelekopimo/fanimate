@@ -18,6 +18,7 @@ fanimate-fnm.workspace = true
 fanimate-render.workspace = true
 fanimate-editor.workspace = true
 fanimate-export.workspace = true
+fanimate-import.workspace = true
 env_logger.workspace = true
 log.workspace = true
 pollster.workspace = true
@@ -30,6 +31,8 @@ serde_json.workspace = true
 eframe = { version = "0.36", default-features = false, features = ["wgpu", "default_fonts", "accesskit", "wayland", "x11", "persistence"] }
 egui_dock = { version = "0.21", features = ["serde"] }
 rfd = "0.17"
+# verifies the signature of downloaded updates
+ed25519-compact = { version = "2.1", default-features = false }
 # SVG icons only: no text, fonts or embedded images
 resvg = { version = "0.48", default-features = false }
 

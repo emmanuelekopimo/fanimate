@@ -59,6 +59,8 @@ pub fn item_checked(ui: &mut egui::Ui, shell: &mut Shell, action: Action, checke
             .map_or("Redo".to_owned(), |l| format!("Redo {l}")),
         // the submenu already says "Open Sample"
         Action::OpenSample(sample) => sample.name().to_owned(),
+        // the submenu already says "Workspace"
+        Action::Workspace(w) => w.name().to_owned(),
         // a switch menu lists the layers to show by name
         Action::SetSwitch(i) => switch_children(shell)
             .and_then(|c| c.into_iter().nth(i))
@@ -84,7 +86,7 @@ fn items(ui: &mut egui::Ui, shell: &mut Shell, actions: &[Action]) {
 }
 
 pub fn file(ui: &mut egui::Ui, shell: &mut Shell) {
-    items(ui, shell, &[Action::New, Action::Open]);
+    items(ui, shell, &[Action::New, Action::Open, Action::OpenOther]);
     ui.menu_button("Open Sample", |ui| {
         ui.set_min_width(MENU_MIN_WIDTH);
         for sample in Sample::ALL {
@@ -302,6 +304,12 @@ pub fn window(ui: &mut egui::Ui, shell: &mut Shell) {
         }
     }
     ui.separator();
+    ui.menu_button("Workspace", |ui| {
+        ui.set_min_width(MENU_MIN_WIDTH);
+        for w in fanimate_editor::Workspace::ALL {
+            item(ui, shell, Action::Workspace(w));
+        }
+    });
     if ui.button("Reset Layout").clicked() {
         shell.ui.reset_layout = true;
         ui.close();
@@ -319,6 +327,7 @@ pub fn help(ui: &mut egui::Ui, shell: &mut Shell) {
         ));
         ui.close();
     }
+    item(ui, shell, Action::CheckForUpdates);
     if ui.button("Report a Bug").clicked() {
         ui.ctx().open_url(egui::OpenUrl::new_tab(
             "https://github.com/toonittmedia/fanimate/issues/new/choose",

@@ -17,6 +17,7 @@ fanimate-core.workspace = true
 fanimate-fnm.workspace = true
 fanimate-render.workspace = true
 fanimate-export.workspace = true
+fanimate-import.workspace = true
 env_logger.workspace = true
 image.workspace = true
 

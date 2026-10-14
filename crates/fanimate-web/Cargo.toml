@@ -1,0 +1,32 @@
+[package]
+name = "fanimate-web"
+description = "Fanimate in the browser: opens, plays and checks projects with the desktop app's engine and renderer (WebGPU)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+# Everything is for the browser; on other targets the crate is empty, so
+# workspace builds and checks stay quick.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+fanimate-core.workspace = true
+fanimate-fnm.workspace = true
+fanimate-render.workspace = true
+fanimate-import.workspace = true
+eframe = { version = "0.36", default-features = false, features = ["wgpu", "default_fonts"] }
+wgpu.workspace = true
+log.workspace = true
+serde_json.workspace = true
+rfd = "0.17"
+wasm-bindgen = "0.2.129"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["Document", "Element", "HtmlCanvasElement", "Window"] }
+
+[lints]
+workspace = true

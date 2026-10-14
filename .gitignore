@@ -28,3 +28,6 @@ desktop.ini
 
 # Release packaging output
 /dist/
+/flatpak-src/
+/.flatpak-builder/
+/flatpak-repo/

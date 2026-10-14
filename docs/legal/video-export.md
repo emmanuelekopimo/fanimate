@@ -37,7 +37,7 @@ These follow [FFmpeg's legal checklist](https://ffmpeg.org/legal.html), applied 
 The GPL does not cover patents. H.264 is covered by patents pooled by Via LA:
 
 - The pool's terms are $0 for the first 100,000 units a year per company, then $0.20 a unit, up to an annual cap. End users' personal use is free. The terms do not say clearly whether free downloads count as units; Via LA answers at info@via-la.com.
-- The last major US H.264 patent (US 7826532) reportedly expires around 29 November 2027; some countries run into the 2030s. Fanimate 1.0 is planned for no earlier than the end of June 2027.
+- The last major US H.264 patent (US 7826532) reportedly expires around 29 November 2027; some countries run into the 2030s. Fanimate 1.0 is expected to ship before the US patents expire.
 - Pool holders have historically pursued companies selling products with H.264, not free open-source projects; Blender, OBS and Krita have shipped x264 for years. The risk is low but not zero, and it sits with whoever distributes the builds.
 - MP4 and MKV as containers carry no patent issue, and AAC encoding by FFmpeg's own encoder is in the same position as H.264 (a pool, with personal use free).
 

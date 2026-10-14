@@ -8,7 +8,7 @@ Fanimate is a free, open-source 2D character animation app. It keeps what animat
 
 **One-line pitch:** Moho's rigging, Harmony's drawing and pipeline, Animate's ease of use. Free, on every platform, with nothing locked away.
 
-**Where we are:** Phase 1 (Foundation). M1 (engine spike) is done on Windows, waiting only for macOS and Linux benchmark numbers on the [reference hardware](docs/reference-hardware.md). M2 (Draw), M3 (Rig) and M4 (Frame-by-frame and voice) are built: drawing, point and pen tools, booleans, point keyframes, timeline key editing, per-layer undo history, crash recovery, bones with IK, smooth binding, Smart Bones, actions, image layers and PSD import, frame-by-frame layers, onion skin, the X-sheet, switch and audio layers, lip sync, SVG import and video export through the render queue are in; their exit checks with testers remain. Status lives in the "Status" section of [docs/roadmap/phase-1.md](docs/roadmap/phase-1.md). Update that section when you finish milestone work.
+**Where we are:** Phase 1 (Foundation), public alpha. M1 (engine spike) is done on Windows, waiting only for macOS and Linux benchmark numbers on the [reference hardware](docs/reference-hardware.md). M2 (Draw), M3 (Rig), M4 (Frame-by-frame and voice) and M5 (Bring your files) are built: drawing, point and pen tools, booleans, point keyframes, timeline key editing, per-layer undo history, crash recovery, bones with IK, smooth binding, Smart Bones, actions, image layers and PSD import, frame-by-frame layers, onion skin, the X-sheet, switch and audio layers, lip sync, SVG import, video export through the render queue, Moho and Animate importers, installers with a signed self-updater, crash reports and the web build are in; their exit checks with testers remain. M6 (public beta, 1.0) is next. Status lives in the "Status" section of [docs/roadmap/phase-1.md](docs/roadmap/phase-1.md). Update that section when you finish milestone work.
 
 ### Read these before non-trivial work
 
@@ -74,10 +74,13 @@ crates/
   fanimate-editor   Editing model: Editor (selection, commands, undo), Action, Tool, keymaps, clipboard. No egui.
   fanimate-export   Video, GIF and PNG export (FFmpeg as a separate program), sound mixing, the render queue folder.
   fanimate-app      The desktop app (eframe/egui + egui_dock): title bar, panels, canvas, dialogs, render queue window.
-  fanimate-cli      Headless tool: sample, validate, render, export, bench.
+  fanimate-import   Moho (.moho/.mohoproj) and Adobe Animate (.fla/.xfl) importers, and a lenient ZIP reader.
+  fanimate-cli      Headless tool: sample, validate, import, corpus, render, export, bench.
+  fanimate-web      The browser player (WebGPU): opens, plays and checks projects. Empty on other targets.
+packaging/          Windows installer (Inno Setup), macOS app and disk image, Linux AppImage, .deb and Flatpak.
 ```
 
-Dependencies point downwards only: core ← fnm ← editor ← app; core ← render ← app/cli; fnm and render ← export ← app/cli. **Keep `fanimate-core` free of UI, GPU and platform code** (it runs headless and in the browser), and **keep `fanimate-editor` free of egui** so every command is unit-tested without a window. If logic can live in `fanimate-editor`, it belongs there, with a test.
+Dependencies point downwards only: core ← fnm ← editor ← app; core ← render ← app/cli; fnm and render ← export ← app/cli; core ← import ← editor/cli/web. **Keep `fanimate-core` free of UI, GPU and platform code** (it runs headless and in the browser), and **keep `fanimate-editor` free of egui** so every command is unit-tested without a window. If logic can live in `fanimate-editor`, it belongs there, with a test.
 
 Key facts:
 
@@ -98,6 +101,9 @@ Key facts:
 - **On Windows the app is a GUI program** (`windows_subsystem = "windows"`), so no console window opens. Print user-facing output with `crate::report`, which falls back to a message box when there is no console.
 - **Bundled programs never show a console.** FFmpeg (video export) and Rhubarb (lip sync) are separate programs shipped beside Fanimate, found there or on PATH, and started through `fanimate_export::ffmpeg::command` or with `CREATE_NO_WINDOW` on Windows. They run off the UI thread; the user sees progress, never a terminal.
 - **Exports run in the render queue process** (`fanimate --render-queue`, `render_queue.rs`), not the editor, so a render goes on after the editor closes. The editor only adds jobs (`fanimate_export::Queue::add`, a copy of `Document::mainline()`) and reads their status. Every export writes `.part` files and renames them when complete.
+- **Importers never panic and always report.** `fanimate_import::import` returns an ordinary `Document` plus a list of what was simplified or left out (`Notes`, counted by kind, phrased "2 masks left out"); the app shows it in the status bar. Bad input is an error string. Add a note kind for anything new an importer drops, and test damaged input. Moho is y-up with a 2-unit-high canvas and frame 0 as the rest pose; Animate edge lists are in twips and fills are rebuilt from `fillStyle0`/`fillStyle1` runs (see the module docs).
+- **Updates are signed.** The release workflow signs the Windows installer, the macOS `.app.tar.gz` and the AppImage with the Ed25519 key in the `UPDATE_SIGNING_KEY` secret (`scripts/sign-update.py`); the app holds the public half (`update::PUBLIC_KEY`) and deletes any download that does not verify. Never change the key without shipping the new public key in an update signed by the old one. Downloads go through the system's `curl`; `FANIMATE_UPDATE_FEED` points the updater at a test feed. Update asset names (`Install::asset_suffix`) and `packaging/` must agree.
+- **Crash reports are the user's to send.** The panic hook (`crash::install_hook`) writes a report; a locked `session-*` marker catches crashes no hook sees. Fanimate only ever opens a pre-filled GitHub issue in the browser; it never sends anything itself, and there is no telemetry.
 - **A maximised borderless window must not cover the whole monitor.** winit sizes it to the work area, which is the whole monitor when the taskbar auto-hides; Windows then treats it as fullscreen (the taskbar stops appearing, Alt+Tab previews and OBS capture can go blank). `titlebar::track_window` replaces that maximise with a normal window one point short of the bottom edge. Keep it when changing window code.
 
 ## Commands
@@ -109,13 +115,16 @@ cargo run --release -p fanimate-cli -- bench        # CPU benchmark
 cargo run --release -p fanimate-cli -- bench --gpu  # plus offscreen GPU render, no window
 cargo run --release -p fanimate-cli -- render scene.fnm -o out.png --frame 12
 cargo run --release -p fanimate-cli -- export scene.fnm -o out.mp4   # needs ffmpeg beside it or on PATH
+cargo run --release -p fanimate-cli -- import walk.moho -o walk.fnm   # or .fla/.xfl; lists what was left out
+cargo run --release -p fanimate-cli -- corpus corpus/                 # import every Moho/Animate file, report each
+scripts/build-web.sh dist/web                       # the browser build (serve the folder over http)
 scripts/build-ffmpeg.sh ffmpeg-out                  # the FFmpeg that releases ship (needs nasm)
 scripts/fetch-rhubarb.sh linux rhubarb-out          # the Rhubarb that releases ship
 
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-cargo check -p fanimate-core -p fanimate-fnm -p fanimate-editor -p fanimate-render --target wasm32-unknown-unknown
+cargo check -p fanimate-core -p fanimate-fnm -p fanimate-editor -p fanimate-render -p fanimate-import --target wasm32-unknown-unknown
 
 python brand/scripts/build_brand.py           # regenerate brand assets
 python brand/scripts/build_brand.py --check   # contrast + themes.css check
@@ -123,7 +132,7 @@ python brand/scripts/build_brand.py --check   # contrast + themes.css check
 pnpm release --dry-run                        # what a release would do
 ```
 
-**CI does not run on every push.** `pnpm release` (scripts/release.js) runs fmt, clippy, tests and the brand check locally, bumps the version in `Cargo.toml`, commits, tags `vX.Y.Z` and pushes; the tag triggers `.github/workflows/release.yml`, which builds and tests on Windows, macOS and Linux and drafts a GitHub release. So **run the checks above yourself before saying work is done.**
+**CI does not run on every push.** `pnpm release` (scripts/release.js) runs fmt, clippy, tests and the brand check locally, bumps the version in `Cargo.toml`, commits, tags `vX.Y.Z` and pushes; the tag triggers `.github/workflows/release.yml`, which builds and tests on Windows, macOS and Linux, builds the installers and the web build, signs the update files and drafts a GitHub release (notes from `docs/releases/vX.Y.Z.md` when that file exists). So **run the checks above yourself before saying work is done.**
 
 ## Code conventions
 

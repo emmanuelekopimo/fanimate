@@ -11,6 +11,7 @@ authors.workspace = true
 [dependencies]
 fanimate-core.workspace = true
 fanimate-fnm.workspace = true
+fanimate-import.workspace = true
 serde.workspace = true
 image.workspace = true
 hound.workspace = true

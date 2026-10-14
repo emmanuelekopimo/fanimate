@@ -36,7 +36,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - name: WebAssembly build (engine crates)
-        run: cargo check -p fanimate-core -p fanimate-fnm -p fanimate-editor -p fanimate-render --target wasm32-unknown-unknown
+        run: cargo check -p fanimate-core -p fanimate-fnm -p fanimate-editor -p fanimate-render -p fanimate-import --target wasm32-unknown-unknown
       - name: Headless render smoke test
         run: |
           cargo run -q -p fanimate-cli -- sample benchmark bench.fnm
@@ -144,8 +144,10 @@ jobs:
         shell: bash
         run: |
           version="${GITHUB_REF_NAME#v}"
-          [ "$GITHUB_REF_TYPE" = "tag" ] || version="dev-${GITHUB_SHA::7}"
+          [ "$GITHUB_REF_TYPE" = "tag" ] || version="0.0.0-dev.${GITHUB_SHA::7}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           dir="fanimate-${version}-${{ matrix.name }}"
+          echo "dir=$dir" >> "$GITHUB_OUTPUT"
           mkdir -p "dist/$dir"
           cp "target/release/fanimate${{ matrix.exe }}" "target/release/fanimate-cli${{ matrix.exe }}" "dist/$dir/"
           cp README.md LICENSE-MIT LICENSE-APACHE "dist/$dir/"
@@ -153,18 +155,51 @@ jobs:
           mkdir -p "dist/$dir/ffmpeg" "dist/$dir/rhubarb"
           cp ffmpeg-out/ffmpeg${{ matrix.exe }} ffmpeg-out/LICENSE.txt ffmpeg-out/README.txt "dist/$dir/ffmpeg/"
           cp -R rhubarb-out/. "dist/$dir/rhubarb/"
+          # a portable archive, as before, beside the installers
           cd dist
           if [ "$RUNNER_OS" = "Windows" ]; then
             7z a -tzip "$dir.zip" "$dir" > /dev/null
-            echo "file=dist/$dir.zip" >> "$GITHUB_OUTPUT"
           else
             tar -czf "$dir.tar.gz" "$dir"
-            echo "file=dist/$dir.tar.gz" >> "$GITHUB_OUTPUT"
           fi
+      # Installers. The self-updater installs the Windows installer, the
+      # macOS .app.tar.gz and the AppImage (crates/fanimate-app/src/update.rs).
+      - name: Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          & $iscc /Q "/DAppVersion=${{ steps.package.outputs.version }}" "/DSourceDir=$PWD\dist\${{ steps.package.outputs.dir }}" "/DOutputDir=$PWD\dist" packaging\windows\fanimate.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: macOS app and disk image
+        if: runner.os == 'macOS'
+        run: bash packaging/macos/package.sh "${{ steps.package.outputs.version }}" "dist/${{ steps.package.outputs.dir }}" dist arm64
+      - name: AppImage and .deb
+        if: runner.os == 'Linux'
+        run: bash packaging/linux/package.sh "${{ steps.package.outputs.version }}" "dist/${{ steps.package.outputs.dir }}" dist
+      - name: Flatpak bundle
+        if: runner.os == 'Linux'
+        # a failure here is reported but does not stop the other packages
+        continue-on-error: true
+        run: |
+          sudo apt-get install -y flatpak flatpak-builder
+          flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+          flatpak-builder --user --install-deps-from=flathub --repo=flatpak-repo --force-clean flatpak-build \
+            packaging/linux/io.github.toonittmedia.Fanimate.yml
+          flatpak build-bundle flatpak-repo "dist/Fanimate-${{ steps.package.outputs.version }}-linux-x86_64.flatpak" \
+            io.github.toonittmedia.Fanimate
       - uses: actions/upload-artifact@v4
         with:
           name: fanimate-${{ matrix.name }}
-          path: ${{ steps.package.outputs.file }}
+          path: |
+            dist/*.zip
+            dist/*.tar.gz
+            dist/*.exe
+            dist/*.dmg
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.flatpak
           retention-days: 30
       - name: Keep FFmpeg's sources for the release
         # the same sources on every platform; published once
@@ -176,9 +211,31 @@ jobs:
             ffmpeg-out/source/*.tar.xz
           retention-days: 30
 
+  web:
+    name: Build (web)
+    needs: checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install the pinned Rust toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - name: Build for the browser (WebGPU)
+        run: bash scripts/build-web.sh dist/web
+      - name: Package
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          [ "$GITHUB_REF_TYPE" = "tag" ] || version="0.0.0-dev.${GITHUB_SHA::7}"
+          cd dist && zip -r "fanimate-$version-web.zip" web
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fanimate-web
+          path: dist/*.zip
+          retention-days: 30
+
   publish:
     name: Draft GitHub release
-    needs: build
+    needs: [build, web]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
@@ -189,6 +246,15 @@ jobs:
           pattern: fanimate-*
           path: dist
           merge-multiple: true
+      - name: Sign update files
+        # the updater refuses files without a signature from this key
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: |
+          pip install cryptography
+          python scripts/sign-update.py dist/*-setup.exe dist/*.app.tar.gz dist/*.AppImage
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS.txt
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -197,7 +263,14 @@ jobs:
           # 0.x versions are pre-releases until 1.0
           pre=""
           case "$tag" in v0.*) pre="--prerelease" ;; esac
+          # written release notes when there are some, else GitHub's list
+          notes="docs/releases/$tag.md"
+          if [ -f "$notes" ]; then
+            how=(--notes-file "$notes")
+          else
+            how=(--generate-notes)
+          fi
           gh release create "$tag" dist/* \
             --draft $pre \
             --title "Fanimate $tag" \
-            --generate-notes
+            "${how[@]}"

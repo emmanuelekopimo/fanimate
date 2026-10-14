@@ -30,6 +30,9 @@ struct Settings {
     onion: OnionSkin,
     /// The format Export Video chose last.
     export_format: fanimate_export::Format,
+    /// After a crash, offer to report it.
+    crash_reports: bool,
+    updates: crate::update::UpdateSettings,
 }
 
 /// Onion skin settings, remembered between sessions.
@@ -67,6 +70,8 @@ impl Default for Settings {
             draw: DrawStyle::default(),
             onion: OnionSkin::default(),
             export_format: Default::default(),
+            crash_reports: true,
+            updates: Default::default(),
         }
     }
 }
@@ -131,6 +136,10 @@ pub struct UiState {
     pub window: titlebar::WindowState,
     /// The Export Video window, while open.
     pub export: Option<crate::export::ExportForm>,
+    /// The Update Fanimate window.
+    pub show_update: bool,
+    /// Arrange the panels this way on the next frame.
+    pub workspace: Option<fanimate_editor::Workspace>,
 }
 
 /// Everything except the dock layout (kept apart so the dock and its tab
@@ -163,6 +172,22 @@ pub struct Shell {
     pub export_format: fanimate_export::Format,
     /// Renders queued from here, for the status bar.
     pub renders: crate::export::Renders,
+    /// A crash from an earlier session, waiting to be reported or not.
+    pub crash: Option<crate::crash::Pending>,
+    /// After a crash, offer to report it (Preferences).
+    pub crash_reports: bool,
+    /// This session's marker; a normal exit removes it.
+    _crash_session: Option<crate::crash::Session>,
+    pub updater: crate::update::Updater,
+    /// How this copy was installed, which decides how it updates.
+    pub install: crate::update::Install,
+    pub updates: crate::update::UpdateSettings,
+    /// Commands recently run from the palette, most recent first.
+    pub recent_actions: Vec<Action>,
+    /// The user asked for this check, so its result is shown.
+    pub update_manual: bool,
+    /// When the automatic check is due.
+    update_due: Option<Instant>,
     last_tick: Instant,
     allow_close: bool,
 }
@@ -198,6 +223,13 @@ impl FanimateApp {
                 ed.playing = true;
                 ed
             }
+            (Some(path), None) if fanimate_import::can_import(path) => match Editor::import_project(path) {
+                Ok(ed) => ed,
+                Err(e) => {
+                    status = Some((StatusKind::Error, e));
+                    Editor::sample()
+                }
+            },
             (Some(path), None) => match Editor::open(path) {
                 Ok((ed, report)) => {
                     if !report.is_clean() {
@@ -227,6 +259,18 @@ impl FanimateApp {
             })
             .unwrap_or_else(|| "no GPU".into());
 
+        crate::crash::set_gpu(&gpu_name);
+        let bench = opts.bench_bones.is_some();
+        let (crash_session, mut crash) = match crate::crash::dir() {
+            Some(dir) if !bench => crate::crash::begin(&dir),
+            _ => (None, None),
+        };
+        if !settings.crash_reports
+            && let Some(p) = crash.take()
+        {
+            crate::crash::dismiss(&p);
+        }
+
         let icon = load_icon(&cc.egui_ctx);
         // the benchmark leaves no trace
         let recovery_root = if opts.bench_bones.is_some() {
@@ -245,6 +289,15 @@ impl FanimateApp {
                 lipsync: None,
                 export_format: settings.export_format,
                 renders: Default::default(),
+                crash,
+                crash_reports: settings.crash_reports,
+                _crash_session: crash_session,
+                updater: Default::default(),
+                install: crate::update::Install::detect(),
+                updates: settings.updates.clone(),
+                recent_actions: Vec::new(),
+                update_manual: false,
+                update_due: (!bench).then(|| Instant::now() + Duration::from_secs(5)),
                 editor,
                 keymap: Keymap::new(KeymapKind::from_id(&settings.keymap).unwrap_or_default()),
                 theme: settings.theme,
@@ -299,6 +352,60 @@ pub fn default_layout() -> DockState<Tab> {
     s.split_below(right, 0.42, vec![Tab::Layers]);
     let [canvas, _timeline] = s.split_below(left, 0.70, vec![Tab::Timeline, Tab::XSheet]);
     s.split_left(canvas, 0.09, vec![Tab::Tools]);
+    dock
+}
+
+/// The panel arrangement for a kind of work.
+pub fn workspace_layout(w: fanimate_editor::Workspace) -> DockState<Tab> {
+    use fanimate_editor::Workspace as W;
+    if w == W::Animate {
+        return default_layout();
+    }
+    let mut dock = DockState::new(vec![Tab::Canvas]);
+    let s = dock.main_surface_mut();
+    match w {
+        W::Animate => {}
+        W::Draw => {
+            let [left, right] = s.split_right(
+                NodeIndex::root(),
+                0.78,
+                vec![Tab::Style, Tab::Properties, Tab::Actions, Tab::History],
+            );
+            s.split_below(right, 0.55, vec![Tab::Layers]);
+            let [canvas, _] = s.split_below(left, 0.84, vec![Tab::Timeline, Tab::XSheet]);
+            s.split_left(canvas, 0.08, vec![Tab::Tools]);
+        }
+        W::Rig => {
+            let [left, right] = s.split_right(
+                NodeIndex::root(),
+                0.72,
+                vec![Tab::Properties, Tab::Actions, Tab::Style],
+            );
+            s.split_below(right, 0.5, vec![Tab::Layers, Tab::History]);
+            let [canvas, _] = s.split_below(left, 0.72, vec![Tab::Timeline, Tab::XSheet]);
+            s.split_left(canvas, 0.09, vec![Tab::Tools]);
+        }
+        W::FrameByFrame => {
+            let [left, right] = s.split_right(NodeIndex::root(), 0.70, vec![Tab::XSheet]);
+            s.split_below(
+                right,
+                0.6,
+                vec![
+                    Tab::Layers,
+                    Tab::Style,
+                    Tab::Properties,
+                    Tab::Actions,
+                    Tab::History,
+                ],
+            );
+            let [canvas, _] = s.split_below(left, 0.70, vec![Tab::Timeline]);
+            s.split_left(canvas, 0.09, vec![Tab::Tools]);
+        }
+        // only the canvas and timeline: the next start opens in Animate
+        W::Review => {
+            s.split_below(NodeIndex::root(), 0.78, vec![Tab::Timeline]);
+        }
+    }
     dock
 }
 
@@ -364,6 +471,7 @@ impl eframe::App for FanimateApp {
             dispatch(&ctx, shell, action);
         }
         recovery::tick(&ctx, shell);
+        update_tick(&ctx, shell);
         if let Some(tab) = shell.ui.open_tab.take() {
             match self.dock.find_tab(&tab) {
                 Some(path) => {
@@ -374,6 +482,9 @@ impl eframe::App for FanimateApp {
         }
         if std::mem::take(&mut shell.ui.reset_layout) {
             self.dock = default_layout();
+        }
+        if let Some(w) = shell.ui.workspace.take() {
+            self.dock = workspace_layout(w);
         }
 
         if let Some(b) = &mut shell.bench {
@@ -417,6 +528,8 @@ impl eframe::App for FanimateApp {
                 draw: s.editor.draw,
                 onion: s.onion,
                 export_format: s.export_format,
+                crash_reports: s.crash_reports,
+                updates: s.updates.clone(),
             },
         );
         eframe::set_value(storage, DOCK_KEY, &self.dock);
@@ -542,6 +655,7 @@ pub fn run_unchecked(ctx: &egui::Context, shell: &mut Shell, action: Action) {
                 shell.replace_editor(Editor::untitled());
             }
             Action::Open => open_dialog(shell),
+            Action::OpenOther => open_other_dialog(shell),
             Action::OpenSample(sample) => shell.replace_editor(Editor::new(sample.document())),
             Action::Save => {
                 save(shell, false);
@@ -566,6 +680,13 @@ pub fn run_unchecked(ctx: &egui::Context, shell: &mut Shell, action: Action) {
                 ctx.send_viewport_cmd(egui::ViewportCommand::Close);
             }
             Action::Preferences => shell.ui.show_preferences = true,
+            Action::CheckForUpdates => {
+                shell.update_manual = true;
+                shell.ui.show_update = true;
+                shell.updater.check(true, &shell.install);
+            }
+            Action::InstallUpdate => install_update(ctx, shell),
+            Action::Workspace(w) => shell.ui.workspace = Some(w),
             Action::CommandPalette => shell.ui.palette = Some(Default::default()),
             Action::LayerProperties => shell.ui.focus_properties = true,
             Action::ZoomIn => zoom_by(shell, 1.25),
@@ -580,6 +701,77 @@ pub fn run_unchecked(ctx: &egui::Context, shell: &mut Shell, action: Action) {
     }
 }
 
+/// Each frame: start the automatic update check when due, and report
+/// what a check found.
+fn update_tick(ctx: &egui::Context, shell: &mut Shell) {
+    use crate::update::State;
+    if let Some(due) = shell.update_due
+        && Instant::now() >= due
+    {
+        shell.update_due = None;
+        if shell.updates.check {
+            shell.updater.check(false, &shell.install);
+        }
+    }
+    match shell.updater.state() {
+        State::Checking { .. } | State::Downloading(_) => {
+            ctx.request_repaint_after(Duration::from_millis(300))
+        }
+        State::UpToDate => {
+            if std::mem::take(&mut shell.update_manual) {
+                let v = crate::update::Version::current();
+                shell
+                    .editor
+                    .set_status(StatusKind::Success, format!("Fanimate {v} is the newest version"));
+                shell.ui.show_update = false;
+            }
+            shell.updater.reset();
+        }
+        State::Failed(e) => {
+            // an automatic check fails quietly: offline is normal
+            if std::mem::take(&mut shell.update_manual) || shell.ui.show_update {
+                shell.editor.set_status(StatusKind::Error, e);
+            }
+            shell.ui.show_update = false;
+            shell.updater.reset();
+        }
+        State::Available(_) => shell.update_manual = false,
+        State::Idle | State::Ready(..) => {}
+    }
+}
+
+/// Install a downloaded update: wait for renders, then hand over to the
+/// installer and quit. Unsaved changes were already asked about.
+fn install_update(ctx: &egui::Context, shell: &mut Shell) {
+    let crate::update::State::Ready(release, file) = shell.updater.state() else {
+        shell.editor.set_status(
+            StatusKind::Info,
+            "No update is ready yet. Use Help > Check for Updates.",
+        );
+        return;
+    };
+    // jobs waiting with no queue window open resume in the new version
+    let rendering = crate::render_queue::queue()
+        .is_some_and(|q| q.has_runner() && q.jobs().iter().any(|e| !e.status.state.is_finished()));
+    if rendering {
+        shell.editor.set_status(
+            StatusKind::Warning,
+            "The render queue is still working. Install the update when it has finished.",
+        );
+        return;
+    }
+    match crate::update::install(&shell.install, &file) {
+        Ok(()) => {
+            log::info!("installing Fanimate {}", release.version);
+            shell.allow_close = true;
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        Err(e) => shell
+            .editor
+            .set_status(StatusKind::Error, format!("Could not install the update: {e}")),
+    }
+}
+
 fn zoom_by(shell: &mut Shell, factor: f32) {
     shell.view.zoom = (shell.view.zoom * factor).clamp(0.02, 64.0);
 }
@@ -588,10 +780,10 @@ fn zoom_by(shell: &mut Shell, factor: f32) {
 /// layers.
 fn import_dialog(shell: &mut Shell) {
     let Some(paths) = rfd::FileDialog::new()
-        .set_title("Import pictures, a Photoshop file or sound")
+        .set_title("Import pictures, a Photoshop or SVG file, or sound")
         .add_filter(
-            "Pictures, Photoshop files and sound",
-            &["png", "jpg", "jpeg", "psd", "wav"],
+            "Pictures, Photoshop and SVG files, and sound",
+            &["png", "jpg", "jpeg", "psd", "svg", "wav"],
         )
         .pick_files()
     else {
@@ -642,6 +834,29 @@ fn open_dialog(shell: &mut Shell) {
             }
         }
         Err(e) => shell.editor.set_status(StatusKind::Error, e.to_string()),
+    }
+}
+
+/// Pick a Moho or Animate project and open it as a new Fanimate project.
+fn open_other_dialog(shell: &mut Shell) {
+    let Some(path) = rfd::FileDialog::new()
+        .set_title("Open a Moho or Animate project")
+        .add_filter("Moho and Animate projects", &fanimate_import::EXTENSIONS)
+        .pick_file()
+    else {
+        return;
+    };
+    match Editor::import_project(&path) {
+        Ok(ed) => shell.replace_editor(ed),
+        Err(e) => {
+            let file = path.file_name().map_or_else(
+                || path.display().to_string(),
+                |f| f.to_string_lossy().into_owned(),
+            );
+            shell
+                .editor
+                .set_status(StatusKind::Error, format!("Could not open {file}: {e}"));
+        }
     }
 }
 

@@ -2,7 +2,7 @@
 
 The product vision requires a legal review before version 1.0. This document scopes it, so it can be planned and budgeted now rather than rushed at the end of Phase 1. It is not legal advice; it lists the questions a qualified lawyer should answer.
 
-**Done so far:** trademark and domain check for the name "Fanimate" (passed, October 2026).
+**Done so far:** trademark and domain check for the name "Fanimate" (passed in M0).
 
 ## 1. Interface and trade dress
 
@@ -53,9 +53,9 @@ Not needed for 1.0, but worth scoping early: terms of service and privacy policy
 
 | When | What |
 |---|---|
-| Milestone M3 (by mid-December 2026) | Sections 1 to 3, before the Moho and Animate importers start in M5; and the video codec question from section 4, which MP4 export in M4 needs |
-| Milestone M5 (February to March 2027) | The rest of section 4, once the dependency list is stable |
-| Milestone M6 (April to June 2027) | Final review of the 1.0 release; section 5 |
-
-Dates follow the [Phase 1 plan](../roadmap/phase-1.md#4-milestones).
+| Now | Sections 1 to 3: the Moho and Animate importers are built (M5) and in the public alpha; and the video codec question from section 4, before 1.0 |
+| Milestone M5 | The rest of section 4, once the dependency list is stable |
+| Milestone M6 | Final review of the 1.0 release; section 5 |
 | Before Phase 3 | Section 6 |
+
+Timing follows the [Phase 1 plan](../roadmap/phase-1.md#4-milestones).
