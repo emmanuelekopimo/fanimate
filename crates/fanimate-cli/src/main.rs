@@ -19,7 +19,7 @@ usage:
   fanimate-cli export <project.fnm> -o <out.mp4|.mov|.avi|.gif|.png|.exr|...> [--format F]
                       [--width W] [--height H] [--start N] [--end N] [--ffmpeg PATH]
   fanimate-cli formats [--ffmpeg PATH]
-  fanimate-cli bench [--bones N] [--frames N] [--seconds S] [--gpu [--width W] [--height H]]";
+  fanimate-cli bench [--bones N] [--frames N] [--seconds S] [--actions] [--gpu [--width W] [--height H]]";
 
 fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
@@ -400,6 +400,50 @@ fn output_size(doc: &Document, w: Option<u32>, h: Option<u32>) -> (u32, u32) {
     }
 }
 
+/// Gate 1's "no UI action over 100 ms": every editing command, run the way
+/// menus, shortcuts and the command palette run it, on a fresh copy of
+/// `doc` with every layer selected. Undo and Redo are timed after a real
+/// edit. Commands that only open a dialog or move the view belong to the
+/// app and are counted, not timed.
+fn bench_actions(doc: &Document) {
+    use fanimate_editor::{Action, Editor, Outcome};
+    const BUDGET_MS: f64 = 100.0;
+    let fresh = || {
+        let mut e = Editor::new(doc.clone());
+        e.select_all();
+        e
+    };
+    let time = |e: &mut Editor, action: Action| {
+        let t0 = Instant::now();
+        let outcome = e.run(action);
+        (t0.elapsed().as_secs_f64() * 1000.0, outcome)
+    };
+    let mut timed: Vec<(f64, String)> = Vec::new();
+    let mut app_only = 0;
+    for action in Action::all() {
+        let mut e = fresh();
+        if matches!(action, Action::Undo | Action::Redo | Action::UndoLayer) {
+            e.run(Action::Duplicate);
+            if action == Action::Redo {
+                e.run(Action::Undo);
+            }
+        }
+        match time(&mut e, action) {
+            (_, Outcome::App(_)) => app_only += 1,
+            (ms, _) => timed.push((ms, action.label().to_string())),
+        }
+    }
+    timed.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let over = timed.iter().filter(|(ms, _)| *ms > BUDGET_MS).count();
+    println!(
+        "  actions      {} timed, {app_only} open a dialog or the view; {over} over {BUDGET_MS} ms",
+        timed.len()
+    );
+    for (ms, label) in timed.iter().take(5) {
+        println!("    {ms:>8.2} ms  {label}");
+    }
+}
+
 /// CPU-side benchmark: evaluate and tessellate every frame, plus file
 /// save and load. `--gpu` adds the full render path without a window (see
 /// [`bench_gpu`]); `fanimate --bench` measures it in the app, UI included.
@@ -464,6 +508,9 @@ fn bench(args: &[String]) -> CmdResult {
             a.get("--height")?.unwrap_or(800),
         );
         bench_gpu(&doc, frames, size)?;
+    }
+    if a.has("--actions") {
+        bench_actions(&doc);
     }
     if cfg!(debug_assertions) {
         println!("  note: debug build; use --release for real numbers");

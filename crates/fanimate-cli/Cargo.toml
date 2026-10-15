@@ -15,6 +15,7 @@ path = "src/main.rs"
 [dependencies]
 fanimate-core.workspace = true
 fanimate-fnm.workspace = true
+fanimate-editor.workspace = true
 fanimate-render.workspace = true
 fanimate-export.workspace = true
 fanimate-import.workspace = true

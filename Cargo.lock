@@ -1515,6 +1515,7 @@ version = "0.2.1"
 dependencies = [
  "env_logger",
  "fanimate-core",
+ "fanimate-editor",
  "fanimate-export",
  "fanimate-fnm",
  "fanimate-import",
