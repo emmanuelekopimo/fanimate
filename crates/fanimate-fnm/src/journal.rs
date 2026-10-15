@@ -532,6 +532,14 @@ mod tests {
         }
     }
 
+    /// The edit a writer child's output line confirms. The test harness
+    /// prints the test's name without a newline, so the first confirmation
+    /// shares its line.
+    fn confirmed(line: &str) -> Option<usize> {
+        let at = line.find("written ")?;
+        line[at + "written ".len()..].trim().parse().ok()
+    }
+
     /// Gate 1's crash recovery test: a process killed outright at a random
     /// moment, 100 times, mid-write or between writes, always leaves a
     /// journal that opens cleanly with the last finished action (or the
@@ -571,8 +579,8 @@ mod tests {
             let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
             while last.map_or(0, |l| l as u64 + 1) < wanted {
                 let line = lines.next().expect("the child stopped early").unwrap();
-                if let Some(n) = line.strip_prefix("written ") {
-                    last = Some(n.parse().unwrap());
+                if let Some(n) = confirmed(&line) {
+                    last = Some(n);
                 }
             }
             std::thread::sleep(std::time::Duration::from_micros(random(3000)));
@@ -581,8 +589,8 @@ mod tests {
             // it kept writing while we waited (on a fast disk, several
             // edits): what it confirmed before dying is still in the pipe
             for line in lines.map_while(|l| l.ok()) {
-                if let Some(n) = line.strip_prefix("written ") {
-                    last = Some(n.parse().unwrap());
+                if let Some(n) = confirmed(&line) {
+                    last = Some(n);
                 }
             }
 
