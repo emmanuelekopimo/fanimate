@@ -11,6 +11,7 @@ use fanimate_editor::StatusKind;
 use fanimate_export::{Format, Queue, Settings, State};
 
 use crate::app::Shell;
+use crate::formats::{self, VideoTools};
 use crate::render_queue;
 
 /// The Export Video window's choices.
@@ -24,8 +25,22 @@ pub struct ExportForm {
     end: Frame,
     /// Without its extension; the format adds it.
     output: PathBuf,
-    /// Whether FFmpeg was found, for the video formats.
-    has_ffmpeg: bool,
+}
+
+/// Why a render cannot be queued yet.
+struct Problem {
+    text: String,
+    /// Setting up FFmpeg in Preferences would solve it.
+    needs_ffmpeg: bool,
+}
+
+impl Problem {
+    fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            needs_ffmpeg: false,
+        }
+    }
 }
 
 impl ExportForm {
@@ -55,17 +70,18 @@ impl ExportForm {
             start: s.start,
             end: s.end,
             output: dir.join(safe_name(&name)),
-            has_ffmpeg: fanimate_export::ffmpeg::find().is_some(),
         }
     }
 
-    fn settings(&self) -> Settings {
+    /// The render's settings, with the FFmpeg chosen in Preferences, if any.
+    fn settings(&self, ffmpeg: Option<&Path>) -> Settings {
         Settings {
             format: self.format,
             width: self.width,
             height: self.height,
             start: self.start,
             end: self.end,
+            ffmpeg: ffmpeg.map(Path::to_path_buf),
         }
     }
 
@@ -74,20 +90,30 @@ impl ExportForm {
     }
 
     /// Why the render cannot be queued yet.
-    fn problem(&self) -> Option<String> {
-        if self.format.needs_ffmpeg() && !self.has_ffmpeg {
-            return Some(
-                "FFmpeg, which makes video files, was not found. Reinstall Fanimate, or choose GIF or PNG."
-                    .into(),
-            );
+    fn problem(&self, tools: &VideoTools) -> Option<Problem> {
+        if tools.looking() {
+            return Some(Problem::new("Checking which formats this computer can make…"));
+        }
+        if let Err(why) = tools.maker(self.format) {
+            return Some(Problem {
+                text: why,
+                needs_ffmpeg: true,
+            });
+        }
+        let (min_w, min_h) = self.format.min_size();
+        if self.width < min_w || self.height < min_h {
+            return Some(Problem::new(format!(
+                "{} needs a size of at least {min_w}x{min_h}.",
+                self.format.label()
+            )));
         }
         let out = self.output();
         match out.parent() {
             Some(dir) if dir.as_os_str().is_empty() || !dir.is_dir() => {
-                Some("Choose a folder that exists to save into.".into())
+                Some(Problem::new("Choose a folder that exists to save into."))
             }
-            None => Some("Choose where to save.".into()),
-            _ if out.file_stem().is_none_or(|s| s.is_empty()) => Some("Give the file a name.".into()),
+            None => Some(Problem::new("Choose where to save.")),
+            _ if out.file_stem().is_none_or(|s| s.is_empty()) => Some(Problem::new("Give the file a name.")),
             _ => None,
         }
     }
@@ -150,12 +176,38 @@ pub fn window(ctx: &egui::Context, shell: &mut Shell) {
                     ui.label("Format");
                     egui::ComboBox::from_id_salt("export-format")
                         .selected_text(form.format.label())
-                        .width(200.0)
+                        .width(240.0)
+                        // every format at once, without scrolling
+                        .height(560.0)
                         .show_ui(ui, |ui| {
-                            for f in Format::ALL {
-                                ui.selectable_value(&mut form.format, f, f.label());
+                            for (i, (group, formats)) in formats::groups().into_iter().enumerate() {
+                                if i > 0 {
+                                    ui.separator();
+                                }
+                                ui.label(RichText::new(group).size(11.0).color(p.text_muted));
+                                for f in formats.iter().copied() {
+                                    // formats this computer cannot make yet stay listed,
+                                    // so choosing one explains what they need
+                                    let text = if shell.video.maker(f).is_ok() || shell.video.looking() {
+                                        RichText::new(f.label())
+                                    } else {
+                                        RichText::new(format!("{} (needs FFmpeg)", f.label()))
+                                            .color(p.text_muted)
+                                    };
+                                    ui.selectable_value(&mut form.format, f, text)
+                                        .on_hover_text(f.hint());
+                                }
                             }
                         });
+                    ui.end_row();
+
+                    ui.label("");
+                    ui.vertical(|ui| {
+                        ui.label(RichText::new(form.format.hint()).size(11.0).color(p.text_muted));
+                        if let Ok(maker) = shell.video.maker(form.format) {
+                            ui.label(RichText::new(maker).size(11.0).color(p.text_muted));
+                        }
+                    });
                     ui.end_row();
 
                     ui.label("Size");
@@ -221,7 +273,7 @@ pub fn window(ctx: &egui::Context, shell: &mut Shell) {
                     ui.end_row();
                 });
             ui.add_space(4.0);
-            let s = form.settings().sanitized();
+            let s = form.settings(None).sanitized();
             let seconds = s.frame_count() as f32 / shell.editor.doc.fps.max(1.0);
             let mut notes = vec![format!("{} frames, {seconds:.1} seconds", s.frame_count())];
             if form.format.has_sound() && !fanimate_export::sound::voices(&shell.editor.doc).is_empty() {
@@ -233,9 +285,14 @@ pub fn window(ctx: &egui::Context, shell: &mut Shell) {
                 notes.push(format!("made {}x{} for video", s.width, s.height));
             }
             ui.label(RichText::new(notes.join(", ")).size(11.0).color(p.text_muted));
-            let problem = form.problem();
+            let problem = form.problem(&shell.video);
             if let Some(problem) = &problem {
-                ui.label(RichText::new(problem).size(11.0).color(p.error));
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(RichText::new(&problem.text).size(11.0).color(p.error));
+                    if problem.needs_ffmpeg && ui.small_button("Set up FFmpeg…").clicked() {
+                        shell.ui.show_preferences = true;
+                    }
+                });
             }
             ui.add_space(8.0);
             ui.horizontal(|ui| {
@@ -274,12 +331,14 @@ fn browse(form: &mut ExportForm) {
         dialog = dialog.set_directory(dir);
     }
     if let Some(path) = dialog.save_file() {
-        // a typed extension names the format
-        if let Some(f) = path.extension().and_then(|e| {
-            Format::ALL
+        // a typed extension names the format, unless the chosen one
+        // already writes it (.mp4 is H.264, H.265 or AV1)
+        if let Some(e) = path.extension()
+            && !e.eq_ignore_ascii_case(form.format.extension())
+            && let Some(f) = Format::ALL
                 .into_iter()
                 .find(|f| e.eq_ignore_ascii_case(f.extension()))
-        }) {
+        {
             form.format = f;
         }
         form.output = path.with_extension("");
@@ -296,7 +355,7 @@ fn add_to_queue(shell: &mut Shell, form: &ExportForm) {
     };
     let output = form.output();
     let doc = shell.editor.doc.mainline();
-    match queue.add(&doc, &output, &form.settings()) {
+    match queue.add(&doc, &output, &form.settings(shell.video.chosen.as_deref())) {
         Ok(id) => {
             shell.renders.watch(id);
             match render_queue::open(shell.theme) {

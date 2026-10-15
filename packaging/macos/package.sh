@@ -3,7 +3,7 @@
 #
 #   packaging/macos/package.sh <version> <release-folder> <out-folder> <arch>
 #
-# <release-folder> holds fanimate, fanimate-cli, ffmpeg/, rhubarb/ and the
+# <release-folder> holds fanimate, fanimate-cli, rhubarb/ and the
 # licence files. Makes:
 #   Fanimate-<version>-macos-<arch>.dmg           to install by dragging
 #   Fanimate-<version>-macos-<arch>.app.tar.gz    what the updater installs

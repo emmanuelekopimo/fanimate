@@ -4,8 +4,8 @@ name: Release
 # by hand from the Actions tab. Ordinary pushes do not run CI; `pnpm release`
 # runs fmt, clippy and the tests locally before it tags.
 #
-# A tag push builds and tests on all three platforms, then drafts a GitHub
-# release with the binaries attached. A manual run does the same builds but
+# A tag push builds and tests on all three platforms, then publishes a
+# GitHub release with the binaries attached. A manual run does the same builds but
 # only keeps them as workflow artifacts, without touching releases.
 
 on:
@@ -72,45 +72,19 @@ jobs:
       - name: Install the pinned Rust toolchain (rust-toolchain.toml)
         run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
-      - name: Install Linux windowing libraries and a software Vulkan driver
+      - name: Install Linux windowing libraries, a software Vulkan driver and FFmpeg
+        # Fanimate does not ship FFmpeg (docs/legal/video-export.md); the
+        # distribution's is installed here so the tests cover the formats a
+        # user's FFmpeg adds. Windows and macOS test their system encoders.
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev libasound2-dev mesa-vulkan-drivers nasm
-      - name: Install FFmpeg build tools (macOS)
-        if: runner.os == 'macOS'
-        run: brew install nasm
-      - name: Install FFmpeg build tools (Windows)
-        if: runner.os == 'Windows'
-        uses: msys2/setup-msys2@v2
-        with:
-          msystem: MINGW64
-          install: >-
-            mingw-w64-x86_64-gcc mingw-w64-x86_64-nasm mingw-w64-x86_64-pkgconf
-            make diffutils git xz
-      # Video export runs FFmpeg as a separate program. It is built here
-      # from pinned, checked sources, and those exact sources are published
-      # with the release (docs/legal/video-export.md).
-      - name: Reuse the FFmpeg build
-        id: ffmpeg-cache
-        uses: actions/cache@v4
-        with:
-          path: ffmpeg-out
-          key: ffmpeg-${{ matrix.name }}-${{ hashFiles('scripts/build-ffmpeg.sh') }}
-      - name: Build FFmpeg
-        if: steps.ffmpeg-cache.outputs.cache-hit != 'true' && runner.os != 'Windows'
-        run: bash scripts/build-ffmpeg.sh ffmpeg-out
-      - name: Build FFmpeg (Windows)
-        if: steps.ffmpeg-cache.outputs.cache-hit != 'true' && runner.os == 'Windows'
-        shell: msys2 {0}
-        run: bash scripts/build-ffmpeg.sh ffmpeg-out
+        run: sudo apt-get update && sudo apt-get install -y libxkbcommon-dev libwayland-dev libgtk-3-dev libasound2-dev mesa-vulkan-drivers ffmpeg
       - name: Fetch Rhubarb Lip Sync
         shell: bash
         run: |
           case "$RUNNER_OS" in Windows) p=windows ;; macOS) p=macos ;; *) p=linux ;; esac
           bash scripts/fetch-rhubarb.sh "$p" rhubarb-out
       - name: Test
-        # with the FFmpeg that ships, so the video export test uses it
-        shell: bash
-        run: PATH="$PWD/ffmpeg-out:$PATH" cargo test --workspace --release
+        run: cargo test --workspace --release
       - name: Build
         run: cargo build --release -p fanimate-app -p fanimate-cli
       - name: Headless render and benchmark
@@ -151,9 +125,8 @@ jobs:
           mkdir -p "dist/$dir"
           cp "target/release/fanimate${{ matrix.exe }}" "target/release/fanimate-cli${{ matrix.exe }}" "dist/$dir/"
           cp README.md LICENSE-MIT LICENSE-APACHE "dist/$dir/"
-          # the programs Fanimate runs: FFmpeg for video, Rhubarb for lip sync
-          mkdir -p "dist/$dir/ffmpeg" "dist/$dir/rhubarb"
-          cp ffmpeg-out/ffmpeg${{ matrix.exe }} ffmpeg-out/LICENSE.txt ffmpeg-out/README.txt "dist/$dir/ffmpeg/"
+          # the program Fanimate runs for lip sync
+          mkdir -p "dist/$dir/rhubarb"
           cp -R rhubarb-out/. "dist/$dir/rhubarb/"
           # a portable archive, as before, beside the installers
           cd dist
@@ -201,15 +174,6 @@ jobs:
             dist/*.deb
             dist/*.flatpak
           retention-days: 30
-      - name: Keep FFmpeg's sources for the release
-        # the same sources on every platform; published once
-        if: matrix.name == 'linux-x64'
-        uses: actions/upload-artifact@v4
-        with:
-          name: fanimate-sources
-          path: |
-            ffmpeg-out/source/*.tar.xz
-          retention-days: 30
 
   web:
     name: Build (web)
@@ -234,7 +198,7 @@ jobs:
           retention-days: 30
 
   publish:
-    name: Draft GitHub release
+    name: Publish GitHub release
     needs: [build, web]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
@@ -255,7 +219,7 @@ jobs:
           python scripts/sign-update.py dist/*-setup.exe dist/*.app.tar.gz dist/*.AppImage
       - name: Checksums
         run: cd dist && sha256sum * > SHA256SUMS.txt
-      - name: Create draft release
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -271,6 +235,6 @@ jobs:
             how=(--generate-notes)
           fi
           gh release create "$tag" dist/* \
-            --draft $pre \
+            $pre \
             --title "Fanimate $tag" \
             "${how[@]}"

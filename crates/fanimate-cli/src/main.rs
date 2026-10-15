@@ -16,8 +16,9 @@ usage:
   fanimate-cli import <file.moho|.mohoproj|.fla|.xfl> -o <out.fnm>
   fanimate-cli corpus <folder>
   fanimate-cli render <project.fnm|file.moho|.fla|.xfl> -o <out.png> [--frame N] [--width W] [--height H]
-  fanimate-cli export <project.fnm> -o <out.mp4|.mkv|.gif|.png> [--width W] [--height H]
-                      [--start N] [--end N]
+  fanimate-cli export <project.fnm> -o <out.mp4|.mov|.avi|.gif|.png|.exr|...> [--format F]
+                      [--width W] [--height H] [--start N] [--end N] [--ffmpeg PATH]
+  fanimate-cli formats [--ffmpeg PATH]
   fanimate-cli bench [--bones N] [--frames N] [--gpu [--width W] [--height H]]";
 
 fn main() -> ExitCode {
@@ -30,6 +31,7 @@ fn main() -> ExitCode {
         Some("corpus") => corpus(&args[1..]),
         Some("render") => render(&args[1..]),
         Some("export") => export(&args[1..]),
+        Some("formats") => formats(&args[1..]),
         Some("bench") => bench(&args[1..]),
         Some("-V" | "--version") => {
             println!("fanimate-cli {}", env!("CARGO_PKG_VERSION"));
@@ -289,19 +291,32 @@ fn collect_importable(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
 /// render queue.
 fn export(args: &[String]) -> CmdResult {
     use fanimate_export::{Format, Settings};
-    let a = Args::parse(args, &["-o", "--width", "--height", "--start", "--end"])?;
+    let a = Args::parse(
+        args,
+        &[
+            "-o", "--width", "--height", "--start", "--end", "--format", "--ffmpeg",
+        ],
+    )?;
     let [path] = a.positional.as_slice() else {
         return Err(USAGE.into());
     };
     let out: PathBuf = a.get::<String>("-o")?.ok_or("export needs -o <out>")?.into();
-    let ext = out
-        .extension()
-        .map(|e| e.to_string_lossy().to_ascii_lowercase())
-        .unwrap_or_default();
-    let format = Format::ALL
-        .into_iter()
-        .find(|f| f.extension() == ext)
-        .ok_or("the output must end in .mp4, .mkv, .gif or .png")?;
+    let format = match a.get::<String>("--format")? {
+        Some(name) => parse_format(&name)?,
+        None => {
+            // the extension names the format; .mp4 is H.264, .mov ProRes 4444,
+            // .png a PNG sequence unless --format says otherwise
+            let ext = out
+                .extension()
+                .map(|e| e.to_string_lossy().to_ascii_lowercase())
+                .unwrap_or_default();
+            let ext = if ext == "tiff" { "tif".to_owned() } else { ext };
+            Format::ALL
+                .into_iter()
+                .find(|f| f.extension() == ext)
+                .ok_or("unknown output type; give --format (see `fanimate-cli formats`)")?
+        }
+    };
     let (doc, report) = fanimate_fnm::load(path).map_err(|e| e.to_string())?;
     if !report.is_clean() {
         eprint!("{report}");
@@ -313,6 +328,7 @@ fn export(args: &[String]) -> CmdResult {
         height,
         start: a.get("--start")?.unwrap_or(doc.start),
         end: a.get("--end")?.unwrap_or(doc.end),
+        ffmpeg: a.get::<String>("--ffmpeg")?.map(PathBuf::from),
     };
     let started = Instant::now();
     let mut last = Instant::now();
@@ -330,6 +346,42 @@ fn export(args: &[String]) -> CmdResult {
         out.display(),
         started.elapsed().as_secs_f64()
     );
+    Ok(ExitCode::SUCCESS)
+}
+
+/// A format by its saved name (`mp4`, `prores4444`, `exr`).
+fn parse_format(name: &str) -> Result<fanimate_export::Format, String> {
+    serde_json::from_str(&format!("\"{}\"", name.to_ascii_lowercase()))
+        .map_err(|_| format!("unknown format {name}; see `fanimate-cli formats`"))
+}
+
+/// Every export format, and what would make it on this computer.
+fn formats(args: &[String]) -> CmdResult {
+    use fanimate_export::ffmpeg::{Ffmpeg, find};
+    use fanimate_export::{Format, Route, route};
+    let a = Args::parse(args, &["--ffmpeg"])?;
+    let chosen = a.get::<String>("--ffmpeg")?.map(PathBuf::from);
+    let system = fanimate_oscodec::h264_available();
+    let ffmpeg = find(chosen.as_deref()).and_then(|p| Ffmpeg::probe(&p).ok());
+    match &ffmpeg {
+        Some(f) => println!("FFmpeg {} at {}", f.version, f.path.display()),
+        None => println!("FFmpeg: not found (it adds ProRes, DNxHR, H.265, WebM and more)"),
+    }
+    println!(
+        "System H.264 encoder: {}
+",
+        if system { "yes" } else { "no" }
+    );
+    for f in Format::ALL {
+        let name = serde_json::to_string(&f).unwrap_or_default().replace('"', "");
+        let how = match route(f, system, ffmpeg.as_ref()) {
+            Ok(Route::BuiltIn) => "Fanimate".to_owned(),
+            Ok(Route::System) => "the system's encoder".to_owned(),
+            Ok(Route::Ffmpeg { encoder, .. }) => format!("FFmpeg ({encoder})"),
+            Err(e) => format!("not available: {e}"),
+        };
+        println!("  {name:<11} {:<34} {how}", f.label());
+    }
     Ok(ExitCode::SUCCESS)
 }
 

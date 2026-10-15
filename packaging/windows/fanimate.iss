@@ -63,9 +63,12 @@ Source: "{#SourceDir}\fanimate-cli.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\README.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\LICENSE-MIT"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\LICENSE-APACHE"; DestDir: "{app}"; Flags: ignoreversion
-; the separate programs Fanimate runs: FFmpeg for video, Rhubarb for lip sync
-Source: "{#SourceDir}\ffmpeg\*"; DestDir: "{app}\ffmpeg"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+; the separate program Fanimate runs for lip sync
 Source: "{#SourceDir}\rhubarb\*"; DestDir: "{app}\rhubarb"; Flags: ignoreversion recursesubdirs createallsubdirs skipifsourcedoesntexist
+
+[InstallDelete]
+; 0.1.0 shipped FFmpeg; video export now uses Windows' own encoder or the user's FFmpeg
+Type: filesandordirs; Name: "{app}\ffmpeg"
 
 [Icons]
 Name: "{group}\Fanimate"; Filename: "{app}\fanimate.exe"

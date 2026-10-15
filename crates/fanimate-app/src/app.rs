@@ -30,6 +30,8 @@ struct Settings {
     onion: OnionSkin,
     /// The format Export Video chose last.
     export_format: fanimate_export::Format,
+    /// The FFmpeg chosen in Preferences; none looks for one.
+    ffmpeg: Option<PathBuf>,
     /// After a crash, offer to report it.
     crash_reports: bool,
     updates: crate::update::UpdateSettings,
@@ -70,6 +72,7 @@ impl Default for Settings {
             draw: DrawStyle::default(),
             onion: OnionSkin::default(),
             export_format: Default::default(),
+            ffmpeg: None,
             crash_reports: true,
             updates: Default::default(),
         }
@@ -170,6 +173,8 @@ pub struct Shell {
     /// A lip sync waiting on Rhubarb.
     pub lipsync: Option<crate::lipsync::Job>,
     pub export_format: fanimate_export::Format,
+    /// What can make each export format here.
+    pub video: crate::formats::VideoTools,
     /// Renders queued from here, for the status bar.
     pub renders: crate::export::Renders,
     /// A crash from an earlier session, waiting to be reported or not.
@@ -288,6 +293,7 @@ impl FanimateApp {
                 audio: Default::default(),
                 lipsync: None,
                 export_format: settings.export_format,
+                video: crate::formats::VideoTools::new(settings.ffmpeg.clone()),
                 renders: Default::default(),
                 crash,
                 crash_reports: settings.crash_reports,
@@ -458,6 +464,11 @@ impl eframe::App for FanimateApp {
             });
 
         dialogs::show(&ctx, shell);
+        if shell.video.poll() {
+            ctx.request_repaint();
+        } else if shell.video.looking() {
+            ctx.request_repaint_after(Duration::from_millis(100));
+        }
         crate::export::window(&ctx, shell);
         {
             let Shell { renders, editor, .. } = shell;
@@ -528,6 +539,7 @@ impl eframe::App for FanimateApp {
                 draw: s.editor.draw,
                 onion: s.onion,
                 export_format: s.export_format,
+                ffmpeg: s.video.chosen.clone(),
                 crash_reports: s.crash_reports,
                 updates: s.updates.clone(),
             },

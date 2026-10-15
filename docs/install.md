@@ -13,7 +13,7 @@ Every release on the [releases page](https://github.com/toonittmedia/fanimate/re
 | Flatpak | `Fanimate-<version>-linux-x86_64.flatpak` | `flatpak install --user Fanimate-*.flatpak` |
 | Any (portable) | `fanimate-<version>-<platform>.zip` / `.tar.gz` | Unpack and run `fanimate`; nothing is installed |
 
-FFmpeg (video export) and Rhubarb (lip sync) come with every package as separate programs; see the [video export legal note](legal/video-export.md).
+Rhubarb (lip sync) comes with every package as a separate program. FFmpeg does not: see [More video formats with FFmpeg](#more-video-formats-with-ffmpeg) and the [video export legal note](legal/video-export.md).
 
 ### Not signed yet
 
@@ -23,6 +23,33 @@ Releases are not yet signed with an Apple Developer ID or a Windows code-signing
 - **macOS** says the app "cannot be opened because the developer cannot be verified": right-click Fanimate in Applications, choose **Open**, then **Open** again. This is needed once.
 
 Each release lists SHA-256 checksums (`SHA256SUMS.txt`) to check a download against.
+
+## More video formats with FFmpeg
+
+Fanimate exports these with nothing else installed:
+
+- **MP4 (H.264)** with sound, made by Windows' or macOS's own video encoder.
+- **MP4 (AV1)**, **uncompressed AVI**, **animated GIF** and **animated PNG**.
+- **PNG, TIFF and OpenEXR** picture sequences.
+
+[FFmpeg](https://ffmpeg.org) is a free program that adds **H.265**, **WebM**, **MKV**, **ProRes 4444**, **ProRes 422**, **DNxHR** and **animated WebP**, and MP4 (H.264) on Linux. Fanimate finds it by itself once it is installed:
+
+| System | How to install FFmpeg |
+|---|---|
+| Windows | Open Terminal (or Command Prompt) and run `winget install Gyan.FFmpeg`. Or download a build from [ffmpeg.org](https://ffmpeg.org/download.html), unzip it, and choose its `bin\ffmpeg.exe` in Fanimate (below). |
+| macOS | With [Homebrew](https://brew.sh): `brew install ffmpeg` |
+| Ubuntu, Debian | `sudo apt install ffmpeg` |
+| Fedora | `sudo dnf install ffmpeg-free` (or `ffmpeg` from RPM Fusion for H.264 and H.265) |
+| Arch | `sudo pacman -S ffmpeg` |
+
+Then, in Fanimate, open **Edit › Preferences**. Under **Video formats** it says which FFmpeg it found and the formats it adds. If it says FFmpeg was not found:
+
+- Choose **Look again** (needed after installing while Fanimate is open), or
+- Choose **Choose FFmpeg…** and pick the `ffmpeg` program (`ffmpeg.exe` on Windows) yourself.
+
+In **File › Export Video**, a format FFmpeg would add is marked "needs FFmpeg"; choosing it shows a **Set up FFmpeg…** button that opens the same place. The Flatpak can only use an FFmpeg inside your home folder, so choose one there.
+
+From the command line, `fanimate-cli formats` lists every format and what makes it, and `fanimate-cli export` takes `--ffmpeg <path>`.
 
 ## Updates
 

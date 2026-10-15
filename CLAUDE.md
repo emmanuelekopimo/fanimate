@@ -72,7 +72,8 @@ crates/
   fanimate-fnm      .fnm reader, atomic writer, validator and repair.
   fanimate-render   lyon tessellation + wgpu renderer; headless render to image.
   fanimate-editor   Editing model: Editor (selection, commands, undo), Action, Tool, keymaps, clipboard. No egui.
-  fanimate-export   Video, GIF and PNG export (FFmpeg as a separate program), sound mixing, the render queue folder.
+  fanimate-export   Video, animated image and picture sequence export (built-in writers, the system encoder, or the user's FFmpeg), sound mixing, the render queue folder.
+  fanimate-oscodec  The system's H.264 and AAC encoders: Media Foundation (Windows), AVFoundation (macOS). The one crate allowed `unsafe`.
   fanimate-app      The desktop app (eframe/egui + egui_dock): title bar, panels, canvas, dialogs, render queue window.
   fanimate-import   Moho (.moho/.mohoproj) and Adobe Animate (.fla/.xfl) importers, and a lenient ZIP reader.
   fanimate-cli      Headless tool: sample, validate, import, corpus, render, export, bench.
@@ -99,7 +100,8 @@ Key facts:
 - **Windows uses DirectX 12 by default**, never Vulkan, and OpenGL only when DirectX 12 has no hardware adapter: the Vulkan driver for some Intel GPUs (seen on HD Graphics 520) crashes the process on load, uncatchably, and the same machine's OpenGL driver crashes in about 1 of 40 runs at process exit even when merely loaded to list adapters. `fanimate_render::backends()` is the single source of this choice; `WGPU_BACKEND` overrides it.
 - egui turns Ctrl+C/X/V into `Event::Copy`/`Cut`/`Paste`, not key events; `app.rs` handles them directly. Shortcuts are ignored while a text field has focus, a modal or a menu is open.
 - **On Windows the app is a GUI program** (`windows_subsystem = "windows"`), so no console window opens. Print user-facing output with `crate::report`, which falls back to a message box when there is no console.
-- **Bundled programs never show a console.** FFmpeg (video export) and Rhubarb (lip sync) are separate programs shipped beside Fanimate, found there or on PATH, and started through `fanimate_export::ffmpeg::command` or with `CREATE_NO_WINDOW` on Windows. They run off the UI thread; the user sees progress, never a terminal.
+- **Separate programs never show a console.** Rhubarb (lip sync) ships beside Fanimate; FFmpeg is the user's own (found by `fanimate_export::ffmpeg::find`: the path chosen in Preferences, PATH, then the usual install folders). Both are started through `fanimate_export::ffmpeg::command` or with `CREATE_NO_WINDOW` on Windows, off the UI thread; the user sees progress, never a terminal.
+- **Each export format has a route** (`Format::writers`, `fanimate_export::route`): built into Fanimate (GIF, APNG, AVI, AV1, picture sequences), the system's encoder (MP4 on Windows and macOS, `fanimate-oscodec`), or the user's FFmpeg (everything else, and MP4 on Linux). Every route converts frames to BT.709 limited range and tags the file so; Windows' encoder cannot tag, so `fanimate-oscodec` rewrites the finished MP4's `avcC` and adds a `colr` box. A format the computer cannot make stays listed, saying what it needs. Never ship or download FFmpeg.
 - **Exports run in the render queue process** (`fanimate --render-queue`, `render_queue.rs`), not the editor, so a render goes on after the editor closes. The editor only adds jobs (`fanimate_export::Queue::add`, a copy of `Document::mainline()`) and reads their status. Every export writes `.part` files and renames them when complete.
 - **Importers never panic and always report.** `fanimate_import::import` returns an ordinary `Document` plus a list of what was simplified or left out (`Notes`, counted by kind, phrased "2 masks left out"); the app shows it in the status bar. Bad input is an error string. Add a note kind for anything new an importer drops, and test damaged input. Moho is y-up with a 2-unit-high canvas and frame 0 as the rest pose; Animate edge lists are in twips and fills are rebuilt from `fillStyle0`/`fillStyle1` runs (see the module docs).
 - **Updates are signed.** The release workflow signs the Windows installer, the macOS `.app.tar.gz` and the AppImage with the Ed25519 key in the `UPDATE_SIGNING_KEY` secret (`scripts/sign-update.py`); the app holds the public half (`update::PUBLIC_KEY`) and deletes any download that does not verify. Never change the key without shipping the new public key in an update signed by the old one. Downloads go through the system's `curl`; `FANIMATE_UPDATE_FEED` points the updater at a test feed. Update asset names (`Install::asset_suffix`) and `packaging/` must agree.
@@ -114,11 +116,11 @@ cargo run --release -p fanimate-app -- --bench      # 10 s playback benchmark
 cargo run --release -p fanimate-cli -- bench        # CPU benchmark
 cargo run --release -p fanimate-cli -- bench --gpu  # plus offscreen GPU render, no window
 cargo run --release -p fanimate-cli -- render scene.fnm -o out.png --frame 12
-cargo run --release -p fanimate-cli -- export scene.fnm -o out.mp4   # needs ffmpeg beside it or on PATH
+cargo run --release -p fanimate-cli -- export scene.fnm -o out.mp4   # --format F, --ffmpeg PATH
+cargo run --release -p fanimate-cli -- formats                        # every format and what makes it here
 cargo run --release -p fanimate-cli -- import walk.moho -o walk.fnm   # or .fla/.xfl; lists what was left out
 cargo run --release -p fanimate-cli -- corpus corpus/                 # import every Moho/Animate file, report each
 scripts/build-web.sh dist/web                       # the browser build (serve the folder over http)
-scripts/build-ffmpeg.sh ffmpeg-out                  # the FFmpeg that releases ship (needs nasm)
 scripts/fetch-rhubarb.sh linux rhubarb-out          # the Rhubarb that releases ship
 
 cargo fmt --all
@@ -136,13 +138,13 @@ pnpm release --dry-run                        # what a release would do
 
 ## Code conventions
 
-- Rust edition 2024, `rustfmt.toml` (max width 110). `cargo clippy -D warnings` must pass. `unsafe` is denied workspace-wide; do not add it.
+- Rust edition 2024, `rustfmt.toml` (max width 110). `cargo clippy -D warnings` must pass. `unsafe` is denied workspace-wide; do not add it. The one exception is `fanimate-oscodec`, which calls the operating system's encoders: every `unsafe` block there has a `SAFETY` comment, and only safe functions leave the crate.
 - **The Rust version is pinned in `rust-toolchain.toml`** and the release workflow installs exactly that version. Never switch CI back to "latest stable": new Rust releases add clippy lints, and an unpinned CI fails on code that passed locally. To upgrade, bump the pin, run clippy and the tests, fix, and commit in one change.
 - Match the surrounding code: comment density, naming and idioms. Comments explain **why**, not what. Module docs say what the module is for.
 - No placeholder code: no `let _ = SomeType::X;` to silence imports, no dead branches, no `todo!()` in shipped paths. Remove unused imports instead.
 - Errors: libraries return typed errors (`thiserror`); the app shows them in the status bar or a dialog. Never `unwrap` on user data or IO.
 - Tests: every editor command, file format change and bug fix gets a test. A bug fix's test must fail before the fix. GPU tests skip cleanly when no adapter exists.
-- Dependencies must be MIT/Apache-compatible (no GPL/LGPL in the app or engine). The one exception is FFmpeg with x264 (GPL), which is never linked: it ships as a separate program, built by `scripts/build-ffmpeg.sh` from pinned sources that every release publishes (`docs/legal/video-export.md`). Keep it that way; do not add FFmpeg bindings. Check versions with `cargo search`; prefer versions at least two weeks old.
+- Dependencies must be MIT/Apache-compatible (no GPL/LGPL in the app or engine). FFmpeg (GPL with x264) is never linked or shipped: Fanimate runs the user's own as a separate program (`docs/legal/video-export.md`). Keep it that way; do not add FFmpeg bindings. Check versions with `cargo search`; prefer versions at least two weeks old.
 - Keep `Cargo.lock` committed. Keep generated assets in sync with their sources.
 
 ## Documentation

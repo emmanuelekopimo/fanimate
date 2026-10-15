@@ -3,7 +3,7 @@
 #
 #   packaging/linux/package.sh <version> <release-folder> <out-folder>
 #
-# <release-folder> holds fanimate, fanimate-cli, ffmpeg/, rhubarb/ and the
+# <release-folder> holds fanimate, fanimate-cli, rhubarb/ and the
 # licence files, as the release workflow assembles them. Makes:
 #   Fanimate-<version>-linux-x86_64.AppImage   updates itself
 #   fanimate_<version>_amd64.deb               installs to /opt/fanimate
@@ -60,6 +60,7 @@ Architecture: amd64
 Installed-Size: $size
 Depends: libc6 (>= 2.35), libgtk-3-0 | libgtk-3-0t64, libasound2 | libasound2t64, libxkbcommon0, libwayland-client0, libgl1
 Recommends: mesa-vulkan-drivers
+Suggests: ffmpeg
 Maintainer: The Fanimate Contributors <noreply@github.com>
 Homepage: https://github.com/toonittmedia/fanimate
 Description: Free 2D character animation

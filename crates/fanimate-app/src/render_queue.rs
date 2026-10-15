@@ -733,14 +733,18 @@ mod tests {
     }
 
     /// Closing the window mid-render ends the render for good: the worker
-    /// stops within a frame, FFmpeg is stopped and waited for, its
-    /// unfinished file is removed and the job waits to start over.
+    /// stops within a frame, the encoder (the system's or FFmpeg) is
+    /// stopped, its unfinished file is removed and the job waits to start
+    /// over.
     #[test]
     fn stopping_the_worker_ends_the_render() {
+        use fanimate_export::ffmpeg::{Ffmpeg, find};
         use fanimate_export::{Format, Queue, Settings, State};
         use std::time::{Duration, Instant};
-        if fanimate_render::Gpu::headless().is_err() || fanimate_export::ffmpeg::find().is_none() {
-            eprintln!("no GPU adapter or no ffmpeg; skipping");
+        let ffmpeg = find(None).and_then(|p| Ffmpeg::probe(&p).ok());
+        let mp4 = fanimate_export::route(Format::Mp4, fanimate_oscodec::h264_available(), ffmpeg.as_ref());
+        if fanimate_render::Gpu::headless().is_err() || mp4.is_err() {
+            eprintln!("no GPU adapter or nothing to make MP4 with; skipping");
             return;
         }
         let dir = std::env::temp_dir().join(format!("fanimate-queue-stop-{}", std::process::id()));
@@ -754,6 +758,7 @@ mod tests {
             height: 180,
             start: 0,
             end: 100_000,
+            ffmpeg: None,
         };
         let id = queue
             .add(&fanimate_core::samples::hello(), &out, &settings)

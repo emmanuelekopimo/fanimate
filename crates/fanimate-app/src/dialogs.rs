@@ -428,8 +428,95 @@ fn preferences(ctx: &egui::Context, shell: &mut Shell) {
                 shell.pending.push(Action::CheckForUpdates);
             }
             ui.checkbox(&mut shell.crash_reports, "After a crash, offer to report it");
+            ui.add_space(8.0);
+            ui.label(RichText::new("Video formats").strong());
+            video_formats(ui, shell);
         });
     shell.ui.show_preferences = open;
+}
+
+/// What makes MP4 here, and the FFmpeg that adds the other video formats.
+fn video_formats(ui: &mut egui::Ui, shell: &mut Shell) {
+    let p = shell.palette;
+    let tools = &mut shell.video;
+    let muted = |text: String| RichText::new(text).color(p.text_muted);
+    if tools.looking() {
+        ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(muted("Looking for video encoders…".into()));
+        });
+        return;
+    }
+    ui.label(if tools.system_h264 {
+        format!(
+            "MP4 (H.264) is made by {}'s built-in encoder. GIF, APNG, AVI, AV1 and picture sequences \
+             are made by Fanimate.",
+            crate::formats::system_name()
+        )
+    } else {
+        "GIF, APNG, AVI, AV1 and picture sequences are made by Fanimate. MP4 (H.264) needs FFmpeg on \
+         this system."
+            .into()
+    });
+    match (&tools.ffmpeg, &tools.ffmpeg_problem) {
+        (Some(f), _) => {
+            ui.label(format!(
+                "FFmpeg {} adds {}.",
+                f.version,
+                list(&tools.ffmpeg_adds())
+            ));
+            let path = f.path.display().to_string();
+            ui.add(egui::Label::new(muted(path.clone()).size(11.0)).truncate())
+                .on_hover_text(path);
+        }
+        (None, Some(problem)) => {
+            ui.label(RichText::new(format!("FFmpeg could not be used: {problem}")).color(p.error));
+        }
+        (None, None) => {
+            ui.label(muted(
+                "FFmpeg was not found. It is free, and adds H.265, WebM, ProRes, DNxHR and animated WebP."
+                    .into(),
+            ));
+        }
+    }
+    ui.horizontal(|ui| {
+        if ui.button("Choose FFmpeg…").clicked() {
+            let mut dialog = rfd::FileDialog::new().set_title("Choose FFmpeg");
+            if cfg!(windows) {
+                dialog = dialog.add_filter("FFmpeg", &["exe"]);
+            }
+            if let Some(path) = dialog.pick_file() {
+                tools.chosen = Some(path);
+                tools.look();
+            }
+        }
+        if ui
+            .button("Look again")
+            .on_hover_text("After installing FFmpeg")
+            .clicked()
+        {
+            tools.look();
+        }
+        if tools.chosen.is_some()
+            && ui
+                .button("Find automatically")
+                .on_hover_text("Forget the chosen FFmpeg and look in the usual places")
+                .clicked()
+        {
+            tools.chosen = None;
+            tools.look();
+        }
+    });
+    ui.hyperlink_to("How to get FFmpeg", crate::formats::HOW_TO_GET_FFMPEG);
+}
+
+/// "a, b and c".
+fn list(items: &[&str]) -> String {
+    match items {
+        [] => "nothing Fanimate uses".into(),
+        [one] => (*one).into(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
 }
 
 fn shortcuts(ctx: &egui::Context, shell: &mut Shell) {
@@ -498,15 +585,22 @@ fn about(ctx: &egui::Context, shell: &mut Shell) {
             // separate programs shipped with Fanimate, under their own licences
             let muted = shell.palette.text_muted;
             ui.label(RichText::new("Ships with").strong());
-            ui.label(
-                RichText::new(
-                    "FFmpeg and x264 for video export (GPL 2.0 or later), run as a separate program; \
-                     their sources are published with each release.",
-                )
-                .color(muted),
-            );
             ui.label(RichText::new("Rhubarb Lip Sync for lip sync (MIT).").color(muted));
             ui.label(RichText::new("Inter font (OFL 1.1) and Lucide icons (ISC).").color(muted));
         });
     shell.ui.show_about = open;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lists_read_naturally() {
+        assert_eq!(list(&["H.265"]), "H.265");
+        assert_eq!(
+            list(&["H.265", "WebM", "ProRes 4444"]),
+            "H.265, WebM and ProRes 4444"
+        );
+    }
 }

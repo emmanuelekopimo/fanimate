@@ -37,7 +37,7 @@ Questions for counsel:
 
 - Confirm the dual MIT / Apache 2.0 licence suits the business model (free app; paid cloud rendering, AI credits, hosting and marketplace).
 - Review third-party licences: Rust crates, the Inter font (OFL 1.1), Rhubarb Lip Sync (MIT), future AI models and their training-data terms.
-- Video codecs: licensing for H.264, H.265, AV1 and ProRes encoding and decoding in a free app. M4 ships MP4 and MKV with H.264 through a bundled GPL FFmpeg run as a separate program, plus GIF and PNG. [video-export.md](video-export.md) sets out the approach, how the release meets the GPL's duties, and the patent question; counsel should confirm the separate-program reading and decide on the H.264 patent pool before 1.0.
+- Video codecs: licensing for H.264, H.265, AV1 and ProRes encoding and decoding in a free app. Since 0.2.0 Fanimate ships no H.264 encoder: MP4 uses the operating system's encoder, AV1 uses rav1e (royalty-free), and FFmpeg formats use the user's own FFmpeg. [video-export.md](video-export.md) sets out each route; counsel should confirm before 1.0 that calling the system's encoders and running the user's own FFmpeg place no patent or GPL duty on Fanimate.
 - Whether a contributor licence agreement or developer certificate of origin is needed, given the inbound-equals-outbound clause in the README.
 
 ## 5. Brand

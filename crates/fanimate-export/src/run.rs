@@ -13,17 +13,22 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use fanimate_core::Document;
 use fanimate_render::{Gpu, Offscreen};
 
-use crate::ffmpeg;
-use crate::job::{Format, Settings};
+use crate::ffmpeg::{self, Ffmpeg};
+use crate::job::{Format, Settings, Writer};
 use crate::sound;
 
 /// The sound's sample rate in exported video.
-const SOUND_RATE: u32 = 48_000;
+pub(crate) const SOUND_RATE: u32 = 48_000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ExportError {
-    #[error("FFmpeg was not found; it ships with Fanimate, so reinstalling should bring it back")]
-    NoFfmpeg,
+    #[error(
+        "{} needs FFmpeg, a free program Fanimate does not include: set it up in Edit › Preferences › Video formats",
+        .0.label()
+    )]
+    NoFfmpeg(Format),
+    #[error("the FFmpeg chosen (version {version}) cannot make {}; try a full build of FFmpeg", .format.label())]
+    FfmpegLacks { format: Format, version: String },
     #[error("the export was cancelled")]
     Cancelled,
     #[error("the frames could not be rendered: {0}")]
@@ -32,21 +37,61 @@ pub enum ExportError {
     Io { path: PathBuf, source: std::io::Error },
     #[error("FFmpeg could not encode the video: {0}")]
     Ffmpeg(String),
+    #[error("the video could not be written: {0}")]
+    Video(String),
     #[error("the GIF could not be written: {0}")]
     Gif(String),
 }
 
-type Result<T> = std::result::Result<T, ExportError>;
+pub(crate) type Result<T> = std::result::Result<T, ExportError>;
 
-fn io(path: &Path) -> impl FnOnce(std::io::Error) -> ExportError + '_ {
+pub(crate) fn io(path: &Path) -> impl FnOnce(std::io::Error) -> ExportError + '_ {
     move |source| ExportError::Io {
         path: path.to_path_buf(),
         source,
     }
 }
 
-/// Export `doc` as `settings` say to `out` (for a PNG sequence, the frames
-/// are named after it: `scene.png` gives `scene_0000.png` and on).
+/// Who writes an export's file.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Route {
+    BuiltIn,
+    System,
+    Ffmpeg { path: PathBuf, encoder: &'static str },
+}
+
+/// How `format` would be written, given whether the system's H.264 encoder
+/// is there and the FFmpeg found, if any. The first writer that can, of
+/// those the format lists, best first.
+pub fn route(format: Format, system_h264: bool, ffmpeg: Option<&Ffmpeg>) -> Result<Route> {
+    for w in format.writers() {
+        match w {
+            Writer::BuiltIn => return Ok(Route::BuiltIn),
+            Writer::System if system_h264 => return Ok(Route::System),
+            Writer::System => {}
+            Writer::Ffmpeg(_) => {
+                if let Some(f) = ffmpeg
+                    && let Some(encoder) = f.encoder_for(format)
+                {
+                    return Ok(Route::Ffmpeg {
+                        path: f.path.clone(),
+                        encoder,
+                    });
+                }
+            }
+        }
+    }
+    Err(match ffmpeg {
+        Some(f) => ExportError::FfmpegLacks {
+            format,
+            version: f.version.clone(),
+        },
+        None => ExportError::NoFfmpeg(format),
+    })
+}
+
+/// Export `doc` as `settings` say to `out` (for a picture sequence, the
+/// frames are named after it: `scene.png` gives `scene_0000.png` and on).
 /// `progress` hears how many of how many frames are done, and returning
 /// `false` from it cancels the export.
 pub fn export(
@@ -56,11 +101,22 @@ pub fn export(
     progress: &mut dyn FnMut(u32, u32) -> bool,
 ) -> Result<()> {
     let s = settings.sanitized();
-    let encoder = if s.format.needs_ffmpeg() {
-        Some(ffmpeg::find().ok_or(ExportError::NoFfmpeg)?)
+    let (min_w, min_h) = s.format.min_size();
+    if s.width < min_w || s.height < min_h {
+        return Err(ExportError::Video(format!(
+            "{} needs pictures at least {min_w} x {min_h} pixels",
+            s.format.label()
+        )));
+    }
+    // decided before anything is rendered, so a missing writer says so at once
+    let system = s.format.writers().contains(&Writer::System) && fanimate_oscodec::h264_available();
+    let needs_ffmpeg = s.format.writers().iter().any(|w| matches!(w, Writer::Ffmpeg(_)));
+    let ffmpeg = if needs_ffmpeg && !system {
+        ffmpeg::find(s.ffmpeg.as_deref()).and_then(|p| Ffmpeg::probe(&p).ok())
     } else {
         None
     };
+    let route = route(s.format, system, ffmpeg.as_ref())?;
     let gpu = Gpu::headless().map_err(|e| ExportError::Render(e.to_string()))?;
     let mut frames = Frames {
         gpu: &gpu,
@@ -70,27 +126,63 @@ pub fn export(
     };
     let total = s.frame_count();
     let mut temps = Temps::default();
-    match (s.format, encoder) {
-        (Format::Png, _) => png_sequence(&mut frames, total, out, &mut temps, progress)?,
-        (Format::Gif, _) => gif(&mut frames, &s, doc.fps, out, &mut temps, progress)?,
-        (_, Some(ffmpeg)) => video(&mut frames, &s, doc, &ffmpeg, out, &mut temps, progress)?,
-        (_, None) => return Err(ExportError::NoFfmpeg),
+    let sound = if s.format.has_sound() {
+        sound::mix(doc, s.start, s.end, SOUND_RATE)
+    } else {
+        None
+    };
+    match route {
+        Route::System => system_video(
+            &mut frames,
+            &s,
+            doc.fps,
+            sound.as_deref(),
+            out,
+            &mut temps,
+            progress,
+        )?,
+        Route::Ffmpeg { path, encoder } => video(
+            &mut frames,
+            &s,
+            doc,
+            sound.as_deref(),
+            &path,
+            encoder,
+            out,
+            &mut temps,
+            progress,
+        )?,
+        Route::BuiltIn => match s.format {
+            Format::Gif => gif(&mut frames, &s, doc.fps, out, &mut temps, progress)?,
+            Format::Apng => crate::apng::write(&mut frames, &s, doc.fps, out, &mut temps, progress)?,
+            Format::Avi => crate::avi::write(
+                &mut frames,
+                &s,
+                doc.fps,
+                sound.as_deref(),
+                out,
+                &mut temps,
+                progress,
+            )?,
+            Format::Av1 => crate::av1::write(&mut frames, &s, doc.fps, out, &mut temps, progress)?,
+            format => crate::sequence::write(&mut frames, format, total, out, &mut temps, progress)?,
+        },
     }
     progress(total, total);
     Ok(())
 }
 
 /// Renders frames one after another into the same target.
-struct Frames<'a> {
+pub(crate) struct Frames<'a> {
     gpu: &'a Gpu,
-    target: Offscreen,
+    pub(crate) target: Offscreen,
     doc: &'a Document,
-    start: i32,
+    pub(crate) start: i32,
 }
 
 impl Frames<'_> {
     /// Frame `i` of the export, as RGBA pixels.
-    fn get(&mut self, i: u32) -> Result<Vec<u8>> {
+    pub(crate) fn get(&mut self, i: u32) -> Result<Vec<u8>> {
         self.target
             .draw(self.gpu, self.doc, (self.start + i as i32) as f32);
         self.target
@@ -101,16 +193,16 @@ impl Frames<'_> {
 
 /// Files to remove however the export ends, unless finished.
 #[derive(Default)]
-struct Temps(Vec<PathBuf>);
+pub(crate) struct Temps(Vec<PathBuf>);
 
 impl Temps {
-    fn add(&mut self, path: PathBuf) -> PathBuf {
+    pub(crate) fn add(&mut self, path: PathBuf) -> PathBuf {
         self.0.push(path.clone());
         path
     }
 
     /// Move finished `part` into place as `out`.
-    fn finish(&mut self, part: &Path, out: &Path) -> Result<()> {
+    pub(crate) fn finish(&mut self, part: &Path, out: &Path) -> Result<()> {
         // a rename does not replace a file everywhere (Windows)
         if out.exists() {
             std::fs::remove_file(out).map_err(io(out))?;
@@ -129,7 +221,7 @@ impl Drop for Temps {
     }
 }
 
-fn part(out: &Path) -> PathBuf {
+pub(crate) fn part(out: &Path) -> PathBuf {
     let mut name = out.file_name().unwrap_or_default().to_owned();
     name.push(".part");
     out.with_file_name(name)
@@ -139,60 +231,25 @@ fn part(out: &Path) -> PathBuf {
 /// was killed before it could clean up (a stop or failure removes them
 /// itself). Finished files are never touched.
 pub(crate) fn remove_parts(out: &Path, format: Format) {
-    if format != Format::Png {
+    if !format.is_sequence() {
         let _ = std::fs::remove_file(part(out));
         return;
     }
-    // a PNG sequence writes one frame at a time, named after `out`
+    // a sequence writes one frame at a time, named after `out`
     let (Some(dir), Some(stem)) = (out.parent(), out.file_stem()) else {
         return;
     };
     let prefix = format!("{}_", stem.to_string_lossy());
+    let suffix = format!(".{}.part", format.extension());
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for e in entries.flatten() {
         let name = e.file_name().to_string_lossy().into_owned();
-        if name.starts_with(&prefix) && name.ends_with(".png.part") {
+        if name.starts_with(&prefix) && name.ends_with(&suffix) {
             let _ = std::fs::remove_file(e.path());
         }
     }
-}
-
-fn png_sequence(
-    frames: &mut Frames,
-    total: u32,
-    out: &Path,
-    temps: &mut Temps,
-    progress: &mut dyn FnMut(u32, u32) -> bool,
-) -> Result<()> {
-    let stem = out.file_stem().unwrap_or_default().to_string_lossy().into_owned();
-    let last = frames.start + total.saturating_sub(1) as i32;
-    let digits = last.to_string().len().max(4);
-    let (w, h) = frames.target.size();
-    for i in 0..total {
-        if !progress(i, total) {
-            return Err(ExportError::Cancelled);
-        }
-        let pixels = frames.get(i)?;
-        let number = frames.start + i as i32;
-        let file = out.with_file_name(format!("{stem}_{number:0digits$}.png"));
-        let tmp = temps.add(part(&file));
-        image::save_buffer_with_format(
-            &tmp,
-            &pixels,
-            w,
-            h,
-            image::ExtendedColorType::Rgba8,
-            image::ImageFormat::Png,
-        )
-        .map_err(|e| ExportError::Io {
-            path: file.clone(),
-            source: std::io::Error::other(e),
-        })?;
-        temps.finish(&tmp, &file)?;
-    }
-    Ok(())
 }
 
 fn gif(
@@ -226,6 +283,41 @@ fn gif(
     temps.finish(&tmp, out)
 }
 
+/// H.264 and AAC in an MP4, by the operating system's own encoder.
+fn system_video(
+    frames: &mut Frames,
+    s: &Settings,
+    fps: f32,
+    sound: Option<&[f32]>,
+    out: &Path,
+    temps: &mut Temps,
+    progress: &mut dyn FnMut(u32, u32) -> bool,
+) -> Result<()> {
+    let tmp = temps.add(part(out));
+    let options = fanimate_oscodec::Options {
+        width: s.width,
+        height: s.height,
+        fps,
+        bit_rate: ffmpeg::bit_rate(s, fps),
+        sound_rate: sound.map(|_| SOUND_RATE),
+    };
+    let video_err = |e: fanimate_oscodec::Error| ExportError::Video(e.to_string());
+    let mut writer = fanimate_oscodec::H264Writer::create(&tmp, options).map_err(video_err)?;
+    let total = s.frame_count();
+    for i in 0..total {
+        if !progress(i, total) {
+            return Err(ExportError::Cancelled);
+        }
+        let pixels = frames.get(i)?;
+        let nv12 = crate::yuv::i420(&pixels, s.width as usize, s.height as usize).nv12();
+        writer
+            .frame(i, &nv12, crate::avi::sound_for_frame(sound, i, fps))
+            .map_err(video_err)?;
+    }
+    writer.finish().map_err(video_err)?;
+    temps.finish(&tmp, out)
+}
+
 /// FFmpeg, stopped if the export ends early.
 struct Encoder(Child);
 
@@ -237,24 +329,27 @@ impl Drop for Encoder {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn video(
     frames: &mut Frames,
     s: &Settings,
     doc: &Document,
+    sound: Option<&[f32]>,
     ffmpeg: &Path,
+    encoder: &str,
     out: &Path,
     temps: &mut Temps,
     progress: &mut dyn FnMut(u32, u32) -> bool,
 ) -> Result<()> {
     static RUNS: AtomicU32 = AtomicU32::new(0);
-    let audio = match sound::mix(doc, s.start, s.end, SOUND_RATE) {
+    let audio = match sound {
         Some(samples) => {
             let path = temps.add(std::env::temp_dir().join(format!(
                 "fanimate-export-{}-{}.wav",
                 std::process::id(),
                 RUNS.fetch_add(1, Ordering::Relaxed)
             )));
-            sound::write_wav(&path, &samples, SOUND_RATE).map_err(|e| ExportError::Io {
+            sound::write_wav(&path, samples, SOUND_RATE).map_err(|e| ExportError::Io {
                 path: path.clone(),
                 source: std::io::Error::other(e),
             })?;
@@ -264,7 +359,7 @@ fn video(
     };
     let tmp = temps.add(part(out));
     let child = ffmpeg::command(ffmpeg)
-        .args(ffmpeg::video_args(s, doc.fps, audio.as_deref(), &tmp))
+        .args(ffmpeg::video_args(s, doc.fps, encoder, audio.as_deref(), &tmp))
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
@@ -338,6 +433,7 @@ mod tests {
             height: 36,
             start: 0,
             end: frames - 1,
+            ffmpeg: None,
         }
     }
 
@@ -398,35 +494,135 @@ mod tests {
         std::fs::remove_dir_all(dir).unwrap();
     }
 
+    fn has(bytes: &[u8], what: &[u8]) -> bool {
+        bytes.windows(what.len()).any(|w| w == what)
+    }
+
     #[test]
-    fn videos_are_encoded_by_ffmpeg_with_their_sound() {
+    fn built_in_formats_write_their_files() {
         let Some(_turn) = gpu() else { return };
-        if ffmpeg::find().is_none() {
-            eprintln!("no ffmpeg; skipping");
+        let dir = temp_dir("built-in");
+        let doc = sound::tests::with_sound(0);
+        for (format, magic) in [
+            (Format::Exr, &[0x76, 0x2f, 0x31, 0x01][..]),
+            (Format::Tiff, &[0x49, 0x49, 0x2a, 0x00][..]),
+            (Format::Apng, &[0x89, 0x50, 0x4e, 0x47][..]),
+            (Format::Avi, &b"RIFF"[..]),
+            (Format::Av1, &b"ftyp"[..]),
+        ] {
+            let out = dir.join(format!("hello.{}", format.extension()));
+            let mut s = small(format, 4);
+            s.width = 63; // AV1 makes it even; the others keep it
+            export(&doc, &s, &out, &mut |_, _| true).unwrap();
+            let file = if format.is_sequence() {
+                crate::sequence::frame_file(&out, format, 1, 4)
+            } else {
+                out.clone()
+            };
+            let bytes = std::fs::read(&file).unwrap_or_else(|e| panic!("{format:?}: {e}"));
+            assert!(
+                bytes.starts_with(magic) || has(&bytes[..16], magic),
+                "{format:?} header"
+            );
+            match format {
+                Format::Apng => assert!(has(&bytes, b"acTL"), "APNG is animated"),
+                Format::Avi => assert!(has(&bytes, b"01wb"), "AVI has sound"),
+                Format::Av1 => assert!(has(&bytes, b"av01"), "MP4 holds AV1"),
+                _ => {}
+            }
+            assert!(!part(&file).exists());
+        }
+        // the sequences decode back as pictures of the size asked for
+        let exr = image::open(crate::sequence::frame_file(
+            &dir.join("hello.exr"),
+            Format::Exr,
+            0,
+            4,
+        ))
+        .unwrap();
+        assert_eq!((exr.width(), exr.height()), (63, 36));
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn mp4_is_written_by_the_system_encoder_where_there_is_one() {
+        let Some(_turn) = gpu() else { return };
+        if !fanimate_oscodec::h264_available() {
+            eprintln!("no system H.264 encoder; skipping");
             return;
         }
-        let dir = temp_dir("video");
-        let has = |bytes: &[u8], what: &[u8]| bytes.windows(what.len()).any(|w| w == what);
-        // the containers name their codecs; read them from the file, as the
-        // FFmpeg Fanimate ships cannot read video back
-        for (format, magic, video, audio) in [
-            (Format::Mp4, &b"ftyp"[..], &b"avc1"[..], &b"mp4a"[..]),
-            (
-                Format::Mkv,
-                &[0x1A, 0x45, 0xDF, 0xA3][..],
-                &b"V_MPEG4/ISO/AVC"[..],
-                &b"A_AAC"[..],
-            ),
+        let dir = temp_dir("system-mp4");
+        let out = dir.join("tone.mp4");
+        let mut s = small(Format::Mp4, 10);
+        s.width = 63; // made even
+        export(&sound::tests::with_sound(0), &s, &out, &mut |_, _| true).unwrap();
+        let bytes = std::fs::read(&out).unwrap();
+        assert!(has(&bytes[..16], b"ftyp") && has(&bytes, b"avc1") && has(&bytes, b"mp4a"));
+        assert!(!part(&out).exists());
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn formats_say_what_they_need() {
+        // with no FFmpeg, FFmpeg-only formats say so; built-in ones never ask
+        assert!(matches!(
+            route(Format::ProRes4444, true, None),
+            Err(ExportError::NoFfmpeg(_))
+        ));
+        assert_eq!(route(Format::Exr, false, None).unwrap(), Route::BuiltIn);
+        assert_eq!(route(Format::Mp4, true, None).unwrap(), Route::System);
+        let lacking = Ffmpeg {
+            path: "ffmpeg".into(),
+            version: "6.0".into(),
+            encoders: ["aac".to_owned()].into(),
+        };
+        let e = route(Format::Hevc, true, Some(&lacking)).unwrap_err();
+        assert!(e.to_string().contains("version 6.0"), "{e}");
+        // MP4 falls back to FFmpeg where the system has no encoder
+        let full = Ffmpeg {
+            encoders: ["libx264".to_owned()].into(),
+            ..lacking
+        };
+        assert!(matches!(
+            route(Format::Mp4, false, Some(&full)),
+            Ok(Route::Ffmpeg {
+                encoder: "libx264",
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn ffmpeg_formats_are_written_by_the_users_ffmpeg() {
+        let Some(_turn) = gpu() else { return };
+        let Some(found) = ffmpeg::find(None).and_then(|p| Ffmpeg::probe(&p).ok()) else {
+            eprintln!("no ffmpeg; skipping");
+            return;
+        };
+        let dir = temp_dir("ffmpeg");
+        // the containers name their codecs; read them from the file
+        for (format, video, audio) in [
+            (Format::Mkv, &b"V_MPEG4/ISO/AVC"[..], &b"A_AAC"[..]),
+            (Format::ProRes4444, &b"ap4h"[..], &b"sowt"[..]),
+            (Format::Dnxhr, &b"AVdh"[..], &b"sowt"[..]),
         ] {
+            if found.encoder_for(format).is_none() {
+                eprintln!("this ffmpeg cannot make {format:?}; skipping it");
+                continue;
+            }
             let out = dir.join(format!("tone.{}", format.extension()));
-            let doc = sound::tests::with_sound(0);
             let mut s = small(format, 10);
             s.width = 63; // made even
-            export(&doc, &s, &out, &mut |_, _| true).unwrap();
+            if format == Format::Dnxhr {
+                let tiny = export(&sound::tests::with_sound(0), &s, &out, &mut |_, _| true).unwrap_err();
+                assert!(tiny.to_string().contains("at least 256 x 120"), "{tiny}");
+                (s.width, s.height) = (256, 144);
+            }
+            export(&sound::tests::with_sound(0), &s, &out, &mut |_, _| true)
+                .unwrap_or_else(|e| panic!("{format:?}: {e}"));
             let bytes = std::fs::read(&out).unwrap();
-            assert!(has(&bytes[..16], magic), "{format:?} header");
-            assert!(has(&bytes, video), "{format:?} has H.264");
-            assert!(has(&bytes, audio), "{format:?} has AAC sound");
+            assert!(has(&bytes, video), "{format:?} video");
+            assert!(has(&bytes, audio), "{format:?} sound");
             assert!(!part(&out).exists());
         }
         std::fs::remove_dir_all(dir).unwrap();

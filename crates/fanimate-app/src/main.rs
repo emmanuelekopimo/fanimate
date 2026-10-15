@@ -23,6 +23,7 @@ mod canvas_gpu;
 mod crash;
 mod dialogs;
 mod export;
+mod formats;
 mod icons;
 mod lipsync;
 mod menus;

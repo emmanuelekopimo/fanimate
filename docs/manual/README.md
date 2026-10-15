@@ -44,7 +44,7 @@ This is the outline of the manual, with the essentials of each chapter. Chapters
 
 ## 7. Exporting
 
-- **File › Export Video** (Ctrl+Shift+R): MP4 or MKV (H.264 with sound), animated GIF or a PNG sequence, at any size and frame range.
+- **File › Export Video** (Ctrl+Shift+R), at any size and frame range. With nothing else installed: MP4 (H.264 with sound, made by Windows' or macOS's own encoder), MP4 (AV1), uncompressed AVI, animated GIF, animated PNG, and PNG, TIFF or OpenEXR sequences. With FFmpeg installed: also H.265, WebM, MKV, ProRes 4444 (with transparency), ProRes 422 HQ, DNxHR HQ and animated WebP. **Edit › Preferences › Video formats** shows what this computer can make; see [More video formats with FFmpeg](../install.md#more-video-formats-with-ffmpeg).
 - Renders run in the render queue, a window of its own that keeps working after Fanimate closes.
 
 ## 8. Keyboard shortcuts

@@ -127,13 +127,14 @@ Exit check: a hand-drawn cycle and a lip-synced line are exported to MP4.
 - [x] Audio layers: WAV import (File › Import), start frame and volume in Properties, playback in time with the timeline, waveforms in the timeline ([spec](../spec/fnm.md#type-audio))
 - [x] Lip sync from sound: Rhubarb Lip Sync, shipped with Fanimate, listens to the dialogue in the background (no console window) and keys the selected switch layer in one undo step; mouths can be named after Rhubarb's letters or the Preston Blair set
 - [x] SVG import: each top-level group (Inkscape and Illustrator layers) becomes a vector layer; outlines, solid colours, opacity, line widths and transforms come through, even-odd fills are refitted, and the status says what was simplified or left out (text, pictures, gradients, clips, masks, filters)
-- [x] Video export v1: File › Export Video (Ctrl+Shift+R) to MP4 or MKV (H.264 with the project's sound as AAC), animated GIF or PNG sequence, at any size and frame range. Renders run in the render queue, a window of its own process that keeps going when the editor closes, with progress, cancel, render again and reordering (drag, arrows or right-click). `fanimate-cli export` does the same headless. FFmpeg ships as a separate program built from published sources ([legal note](../legal/video-export.md))
+- [x] Video export v1: File › Export Video (Ctrl+Shift+R) to MP4 or MKV (H.264 with the project's sound as AAC), animated GIF or PNG sequence, at any size and frame range. Renders run in the render queue, a window of its own process that keeps going when the editor closes, with progress, cancel, render again and reordering (drag, arrows or right-click). `fanimate-cli export` does the same headless ([legal note](../legal/video-export.md))
+- [x] Video export v2: no bundled FFmpeg. MP4 (H.264 and AAC) through the system's encoder (Media Foundation on Windows, AVFoundation on macOS); Fanimate itself writes AV1 MP4 (rav1e), uncompressed AVI, animated PNG and TIFF and OpenEXR sequences; an FFmpeg the user installs adds H.265, WebM, MKV, ProRes 4444 and 422, DNxHR and animated WebP. Preferences › Video formats finds or chooses FFmpeg and says what it adds; the Export window groups formats and says what makes each. Every route converts and tags BT.709. `fanimate-cli formats` lists the routes
 - [ ] Exit check with a tester
 - [ ] Legal sign-off on the codec approach and the H.264 patent question ([review scope](../legal/review-scope.md), section 4)
 
 Not in M4, and why:
 
-- **AV1 and WebM export**: royalty-free, and recommended as an option in the legal note, but they need another encoder in the FFmpeg build. MP4 and MKV with H.264 cover the exit check.
+- **Sound in AV1 export**: waits for a suitable Opus encoder in Rust. MP4 (H.264) carries sound.
 - **Other sound formats** (MP3, OGG): WAV is what Rhubarb reads and what dialogue recording tools produce; others can follow.
 
 ### M5: Bring your files (built; public alpha released)
@@ -570,7 +571,7 @@ The first plan gave M0 to M2 the first five months and the whole phase about 12 
 | Artists and Moho animators | The exit checks for M2 to M4, the WS7 usability session and the Gate 1 usability test need real users. No advisers are recruited yet | M2, M3, M4, M6 |
 | Reference hardware | The 60 fps budget is measured on specific machines the team needs access to | M1, M3, M6 |
 | Import test corpus | 100 Moho and 50 Animate files, each with recorded consent. None are collected yet, and the importers cannot be measured without them | M5 |
-| Legal review | External. The [video export note](../legal/video-export.md) asks counsel to settle the codec question before 1.0; MP4 export has shipped in the pre-releases since 0.0.6 on its low-risk reading | M6 |
+| Legal review | External. The [video export note](../legal/video-export.md) asks counsel to settle the codec question before 1.0; since 0.2.0 MP4 uses the system's encoder and Fanimate ships no H.264 encoder | M6 |
 | Code signing | Apple Developer account and a Windows code-signing certificate; identity checks take days to weeks. The installers and the self-updater's signature check need them | M5 |
 | Public beta | 99.5% crash-free sessions means fewer than 1 crash in 200 sessions, which takes thousands of opt-in sessions to show. Users, crash reports and stability releases need weeks, not days | M6 |
 

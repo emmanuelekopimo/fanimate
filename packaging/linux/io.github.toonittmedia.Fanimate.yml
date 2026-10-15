@@ -23,7 +23,7 @@ modules:
     buildsystem: simple
     build-commands:
       - mkdir -p /app/lib/fanimate /app/bin
-      - cp -r fanimate fanimate-cli ffmpeg rhubarb LICENSE-MIT LICENSE-APACHE /app/lib/fanimate/
+      - cp -r fanimate fanimate-cli rhubarb LICENSE-MIT LICENSE-APACHE /app/lib/fanimate/
       - ln -s /app/lib/fanimate/fanimate /app/bin/fanimate
       - ln -s /app/lib/fanimate/fanimate-cli /app/bin/fanimate-cli
       - install -Dm644 io.github.toonittmedia.Fanimate.desktop /app/share/applications/io.github.toonittmedia.Fanimate.desktop

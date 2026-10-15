@@ -7,11 +7,12 @@ fanimate-core      scene graph, animation channels, bones, frame evaluation
   ├─ fanimate-fnm      .fnm reader, atomic writer, validator and repair, crash journal
   ├─ fanimate-import   Moho and Adobe Animate importers
   ├─ fanimate-render   tessellation (lyon) and the wgpu renderer
-  │    └─ fanimate-export   video, GIF and PNG export through FFmpeg; the render queue folder
+  │    └─ fanimate-export   video, animated image and picture sequence export; the render queue folder
   └─ fanimate-editor   editing model: selection, commands, undo, keymaps (no UI toolkit)
        └─ fanimate-app      desktop app (eframe/egui): panels, canvas, dialogs, updater, crash reports
 fanimate-cli       headless tool: render, export, import, validate, benchmark
 fanimate-web       browser player (WebGPU): opens, plays and checks projects
+fanimate-oscodec   the system's H.264 and AAC encoders (Media Foundation, AVFoundation), used by export
 ```
 
 Dependencies only point down. `fanimate-core`, `fanimate-fnm`, `fanimate-editor`, `fanimate-render` and `fanimate-import` compile to WebAssembly, so the browser build and future tools share the engine.

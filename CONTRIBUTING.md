@@ -33,7 +33,7 @@ Linux also needs the usual windowing libraries, for example on Ubuntu:
 sudo apt install libxkbcommon-dev libwayland-dev libgtk-3-dev libasound2-dev
 ```
 
-MP4 and MKV export and lip sync run separate programs that releases ship beside Fanimate. In a development build, put any `ffmpeg` (with libx264) and `rhubarb` on your PATH, or build the exact ones releases ship with `scripts/build-ffmpeg.sh ffmpeg-out` (needs nasm) and `scripts/fetch-rhubarb.sh <windows|linux|macos> rhubarb-out`. GIF and PNG export need neither.
+Lip sync runs Rhubarb, a separate program that releases ship beside Fanimate: in a development build, put `rhubarb` on your PATH or fetch the one releases ship with `scripts/fetch-rhubarb.sh <windows|linux|macos> rhubarb-out`. MP4 export uses the system's encoder on Windows and macOS. The formats FFmpeg adds (H.265, WebM, MKV, ProRes, DNxHR, WebP, and MP4 on Linux) use any `ffmpeg` you install; their tests skip when there is none. Releases do not ship FFmpeg.
 
 ### Repository layout
 
@@ -43,7 +43,8 @@ MP4 and MKV export and lip sync run separate programs that releases ship beside 
 | `crates/fanimate-fnm` | `.fnm` reader, writer and validator |
 | `crates/fanimate-render` | Tessellation (lyon) and GPU drawing (wgpu) |
 | `crates/fanimate-editor` | Editing model: selection, commands, undo, clipboard, keymaps. No UI toolkit code. |
-| `crates/fanimate-export` | Video, GIF and PNG export, sound mixing and the render queue folder |
+| `crates/fanimate-export` | Video, animated image and picture sequence export, sound mixing and the render queue folder |
+| `crates/fanimate-oscodec` | The system's H.264 and AAC encoders (Media Foundation, AVFoundation); the one crate allowed `unsafe` |
 | `crates/fanimate-app` | The desktop app (`fanimate` binary): title bar, docked panels, canvas, dialogs, render queue window |
 | `crates/fanimate-cli` | Headless tool (`fanimate-cli`): render, export, validate, benchmark |
 | `docs/` | Product vision, roadmap, file format specification |

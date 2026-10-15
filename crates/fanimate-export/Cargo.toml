@@ -12,8 +12,15 @@ authors.workspace = true
 fanimate-core.workspace = true
 fanimate-fnm.workspace = true
 fanimate-render.workspace = true
+fanimate-oscodec.workspace = true
 hound.workspace = true
-image = { workspace = true, features = ["gif"] }
+image = { workspace = true, features = ["gif", "exr", "tiff"] }
+# animated PNG (the png crate image already uses)
+png = "0.18"
+# AV1, pure Rust, and the MP4 it goes in: royalty-free video Fanimate
+# writes with nothing else installed
+rav1e = { version = "0.8.1", default-features = false, features = ["threading"] }
+muxide = "0.2.5"
 log.workspace = true
 serde.workspace = true
 serde_json.workspace = true
