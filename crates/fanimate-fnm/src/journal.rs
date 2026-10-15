@@ -578,6 +578,13 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_micros(random(3000)));
             child.kill().unwrap();
             child.wait().unwrap();
+            // it kept writing while we waited (on a fast disk, several
+            // edits): what it confirmed before dying is still in the pipe
+            for line in lines.map_while(|l| l.ok()) {
+                if let Some(n) = line.strip_prefix("written ") {
+                    last = Some(n.parse().unwrap());
+                }
+            }
 
             let found = find_recoverable(&root);
             let Some(last) = last else {
