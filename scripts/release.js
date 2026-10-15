@@ -2,7 +2,7 @@
 //
 // CI does not run on every push. Pushing a `v*` tag is what starts the
 // release workflow (.github/workflows/release.yml), which builds and tests on
-// Windows, macOS and Linux and drafts a GitHub release. Because nothing
+// Windows, macOS and Linux and publishes a GitHub release. Because nothing
 // checks ordinary pushes, this script runs the same checks locally first.
 
 import { execSync, spawnSync } from 'node:child_process';
@@ -182,7 +182,7 @@ function run() {
 
   console.log(`\nPushed ${newTag}. The release workflow is building it now:`);
   console.log('  https://github.com/toonittmedia/fanimate/actions/workflows/release.yml');
-  console.log('When it finishes, review and publish the draft release on GitHub.');
+  console.log('When it finishes, the release is published on GitHub with the notes in docs/releases/ (if any).');
 }
 
 run();

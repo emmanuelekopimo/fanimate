@@ -134,7 +134,7 @@ python brand/scripts/build_brand.py --check   # contrast + themes.css check
 pnpm release --dry-run                        # what a release would do
 ```
 
-**CI does not run on every push.** `pnpm release` (scripts/release.js) runs fmt, clippy, tests and the brand check locally, bumps the version in `Cargo.toml`, commits, tags `vX.Y.Z` and pushes; the tag triggers `.github/workflows/release.yml`, which builds and tests on Windows, macOS and Linux, builds the installers and the web build, signs the update files and drafts a GitHub release (notes from `docs/releases/vX.Y.Z.md` when that file exists). So **run the checks above yourself before saying work is done.**
+**CI does not run on every push.** `pnpm release` (scripts/release.js) runs fmt, clippy, tests and the brand check locally, bumps the version in `Cargo.toml`, commits, tags `vX.Y.Z` and pushes; the tag triggers `.github/workflows/release.yml`, which builds and tests on Windows, macOS and Linux, builds the installers and the web build, signs the update files and publishes the GitHub release (notes from `docs/releases/vX.Y.Z.md` when that file exists). So **run the checks above yourself before saying work is done.**
 
 ## Code conventions
 

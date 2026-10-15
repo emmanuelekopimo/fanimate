@@ -88,7 +88,7 @@ pnpm release 1.0.0      # an exact version
 pnpm release --dry-run  # run the checks and show the plan, change nothing
 ```
 
-The script requires a clean `main` that is up to date with GitHub. It runs fmt, clippy, the tests and the brand token check, sets the version in `Cargo.toml`, commits, tags `vX.Y.Z` and pushes. The tag starts the [release workflow](.github/workflows/release.yml), which tests and builds on Windows, macOS and Linux and creates a **draft** GitHub release with the binaries. Review the draft and publish it by hand.
+The script requires a clean `main` that is up to date with GitHub. It runs fmt, clippy, the tests and the brand token check, sets the version in `Cargo.toml`, commits, tags `vX.Y.Z` and pushes. The tag starts the [release workflow](.github/workflows/release.yml), which tests and builds on Windows, macOS and Linux and publishes the GitHub release with the binaries, using `docs/releases/vX.Y.Z.md` as its notes when that file exists. Write the notes before releasing.
 
 ### What we look for in review
 
