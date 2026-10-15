@@ -1482,7 +1482,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "cpal",
  "ed25519-compact",
@@ -1511,7 +1511,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "env_logger",
  "fanimate-core",
@@ -1527,7 +1527,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "glam",
  "i_overlay",
@@ -1537,7 +1537,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-editor"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fanimate-core",
  "fanimate-fnm",
@@ -1552,7 +1552,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-export"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fanimate-core",
  "fanimate-fnm",
@@ -1571,7 +1571,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-fnm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fanimate-core",
  "serde",
@@ -1581,7 +1581,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-import"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "fanimate-core",
  "image",
@@ -1592,7 +1592,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-oscodec"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "block2 0.6.2",
  "objc2 0.6.5",
@@ -1609,7 +1609,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-render"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "bytemuck",
  "fanimate-core",
@@ -1623,7 +1623,7 @@ dependencies = [
 
 [[package]]
 name = "fanimate-web"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "eframe",
  "fanimate-core",
