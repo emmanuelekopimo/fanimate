@@ -11,7 +11,7 @@ use fanimate_render::{Gpu, Mesh, Offscreen, Tessellator, render_to_rgba};
 
 const USAGE: &str = "\
 usage:
-  fanimate-cli sample <hello|benchmark> <out.fnm> [--bones N]
+  fanimate-cli sample <hello|benchmark|episode> <out.fnm> [--bones N] [--seconds S]
   fanimate-cli validate <project.fnm> [--repair]
   fanimate-cli import <file.moho|.mohoproj|.fla|.xfl> -o <out.fnm>
   fanimate-cli corpus <folder>
@@ -19,7 +19,7 @@ usage:
   fanimate-cli export <project.fnm> -o <out.mp4|.mov|.avi|.gif|.png|.exr|...> [--format F]
                       [--width W] [--height H] [--start N] [--end N] [--ffmpeg PATH]
   fanimate-cli formats [--ffmpeg PATH]
-  fanimate-cli bench [--bones N] [--frames N] [--gpu [--width W] [--height H]]";
+  fanimate-cli bench [--bones N] [--frames N] [--seconds S] [--gpu [--width W] [--height H]]";
 
 fn main() -> ExitCode {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
@@ -96,14 +96,18 @@ impl Args {
 }
 
 fn sample(args: &[String]) -> CmdResult {
-    let a = Args::parse(args, &["--bones"])?;
+    let a = Args::parse(args, &["--bones", "--seconds"])?;
     let [kind, out] = a.positional.as_slice() else {
         return Err(USAGE.into());
     };
     let doc = match kind.as_str() {
         "hello" => samples::hello(),
         "benchmark" => samples::benchmark(a.get("--bones")?.unwrap_or(40)),
-        other => return Err(format!("unknown sample {other}; use hello or benchmark")),
+        "episode" => samples::episode(
+            a.get("--bones")?.unwrap_or(40),
+            a.get("--seconds")?.unwrap_or(300),
+        ),
+        other => return Err(format!("unknown sample {other}; use hello, benchmark or episode")),
     };
     fanimate_fnm::save(&doc, out).map_err(|e| e.to_string())?;
     println!("wrote {out}");
@@ -400,10 +404,14 @@ fn output_size(doc: &Document, w: Option<u32>, h: Option<u32>) -> (u32, u32) {
 /// save and load. `--gpu` adds the full render path without a window (see
 /// [`bench_gpu`]); `fanimate --bench` measures it in the app, UI included.
 fn bench(args: &[String]) -> CmdResult {
-    let a = Args::parse(args, &["--bones", "--frames", "--width", "--height"])?;
+    let a = Args::parse(args, &["--bones", "--frames", "--width", "--height", "--seconds"])?;
     let bones: usize = a.get("--bones")?.unwrap_or(40);
     let frames: u32 = a.get("--frames")?.unwrap_or(2000);
-    let doc = samples::benchmark(bones);
+    // --seconds 300: the Gate 1 project-open scene, a 5-minute episode
+    let doc = match a.get::<u32>("--seconds")? {
+        Some(seconds) => samples::episode(bones, seconds),
+        None => samples::benchmark(bones),
+    };
 
     let mut evaluator = Evaluator::default();
     let mut tess = Tessellator::new();

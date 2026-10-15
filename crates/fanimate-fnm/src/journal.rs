@@ -502,4 +502,113 @@ mod tests {
         assert!(find_recoverable(&root).is_empty());
         fs::remove_dir_all(root).unwrap();
     }
+
+    const WRITER: &str = "FANIMATE_JOURNAL_WRITER_CHILD";
+
+    /// Helper for the kill test below: in a child process, records edits
+    /// one after another until killed, printing each once it is on disk.
+    /// Does nothing when run as a normal test.
+    #[test]
+    fn writer_child() {
+        let Ok(root) = std::env::var(WRITER) else { return };
+        let journal = Journal::start(Path::new(&root)).unwrap();
+        let mut record = HistoryRecord::default();
+        // far more than a trial waits for; then wait to be killed
+        for i in 0..1000 {
+            let like = record.states.last().cloned();
+            record
+                .states
+                .push(crate::HistoryState::capture(&edited(i), &[], like.as_ref()));
+            if i > 0 {
+                record.labels.push(format!("Edit {i}"));
+            }
+            record.cursor = i;
+            journal.record(&edited(i), None, true, Some(record.clone()));
+            journal.flush();
+            println!("written {i}");
+        }
+        loop {
+            std::thread::park();
+        }
+    }
+
+    /// Gate 1's crash recovery test: a process killed outright at a random
+    /// moment, 100 times, mid-write or between writes, always leaves a
+    /// journal that opens cleanly with the last finished action (or the
+    /// one being written, if it got to disk before the kill).
+    #[test]
+    fn work_survives_100_kills_at_random_moments() {
+        use std::io::{BufRead, BufReader};
+        use std::process::Stdio;
+        let root = temp_root("kills");
+        // xorshift: the same moments every run
+        let mut seed = 0x9e37_79b9_7f4a_7c15u64;
+        let mut random = move |n: u64| {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed % n
+        };
+        for trial in 0..100 {
+            let spawn = SPAWN.lock().unwrap_or_else(|e| e.into_inner());
+            let mut child = Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "journal::tests::writer_child",
+                    "--nocapture",
+                    "--test-threads=1",
+                ])
+                .env(WRITER, &root)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
+            drop(spawn);
+            // let it finish 0 to 40 writes, then kill it within a few
+            // milliseconds: sometimes between writes, sometimes during one
+            let wanted = random(41);
+            let mut last: Option<usize> = None;
+            let mut lines = BufReader::new(child.stdout.take().unwrap()).lines();
+            while last.map_or(0, |l| l as u64 + 1) < wanted {
+                let line = lines.next().expect("the child stopped early").unwrap();
+                if let Some(n) = line.strip_prefix("written ") {
+                    last = Some(n.parse().unwrap());
+                }
+            }
+            std::thread::sleep(std::time::Duration::from_micros(random(3000)));
+            child.kill().unwrap();
+            child.wait().unwrap();
+
+            let found = find_recoverable(&root);
+            let Some(last) = last else {
+                // killed before its first write finished: nothing, or edit 0
+                for r in &found {
+                    let (doc, report) = r.load().unwrap();
+                    assert!(report.is_clean(), "trial {trial}: {report}");
+                    assert_eq!(doc, edited(0), "trial {trial}");
+                    r.discard();
+                }
+                continue;
+            };
+            assert_eq!(found.len(), 1, "trial {trial}: one session to recover");
+            let r = &found[0];
+            let (doc, report) = r.load().unwrap();
+            assert!(report.is_clean(), "trial {trial}: {report}");
+            assert!(
+                doc == edited(last) || doc == edited(last + 1),
+                "trial {trial}: recovered something other than edit {last} or {}",
+                last + 1
+            );
+            if let Some(history) = r.load_history() {
+                let at = history.cursor;
+                assert!(
+                    at == last || at == last + 1,
+                    "trial {trial}: history at {at}, wrote {last}"
+                );
+                assert_eq!(history.states[at].document(), edited(at), "trial {trial}");
+            }
+            r.discard();
+        }
+        fs::remove_dir_all(root).unwrap();
+    }
 }

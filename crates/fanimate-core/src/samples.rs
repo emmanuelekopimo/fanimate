@@ -227,6 +227,33 @@ pub fn benchmark(bones: usize) -> Document {
     doc
 }
 
+/// The Gate 1 project-open scene: the benchmark character animated for
+/// `seconds` (an episode is 300), its bones keyed every 6 frames all the
+/// way through, as a long shot animated by hand would be.
+pub fn episode(bones: usize, seconds: u32) -> Document {
+    let mut doc = benchmark(bones);
+    let period = doc.end + 1;
+    let frames = (seconds as f32 * doc.fps).round().max(1.0) as Frame;
+    doc.name = format!("Episode ({bones} bones, {seconds} s)");
+    doc.end = frames - 1;
+    for layer in &mut doc.layers {
+        if let LayerKind::Bone { skeleton, .. } = &mut layer.kind {
+            for bone in &mut skeleton.bones {
+                let cycle = bone.angle.keys.clone();
+                for repeat in 1..=frames / period {
+                    for key in &cycle {
+                        let frame = key.frame + repeat * period;
+                        if frame < frames {
+                            bone.angle.set_key(frame, key.value, key.interp);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    doc
+}
+
 fn map_cmd(c: crate::PathCmd, f: impl Fn(Vec2) -> Vec2) -> crate::PathCmd {
     use crate::PathCmd::*;
     match c {
@@ -241,6 +268,24 @@ fn map_cmd(c: crate::PathCmd, f: impl Fn(Vec2) -> Vec2) -> crate::PathCmd {
 mod tests {
     use super::*;
     use crate::evaluate;
+
+    #[test]
+    fn an_episode_is_keyed_all_the_way_through() {
+        let doc = episode(4, 300);
+        assert_eq!(doc.frame_count(), 7200);
+        let mut keys = 0;
+        let mut last = 0;
+        doc.walk(|l| {
+            if let LayerKind::Bone { skeleton, .. } = &l.kind {
+                for b in &skeleton.bones {
+                    keys += b.angle.keys.len();
+                    last = last.max(b.angle.keys.last().map_or(0, |k| k.frame));
+                }
+            }
+        });
+        assert_eq!(keys, 4 * 1200);
+        assert_eq!(last, 7194);
+    }
 
     #[test]
     fn benchmark_has_requested_bones_and_shapes() {

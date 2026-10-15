@@ -6,7 +6,7 @@ Companion to the [product vision](../product-vision.md). The brand assets propos
 
 ## Status
 
-*Updated when M5 was built and the first public alpha (0.1.0) was released. Estimated durations for the remaining work are in [section 4](#4-milestones).*
+*Updated with 0.2.0 and the first Gate 1 measurements. Estimated durations for the remaining work are in [section 4](#4-milestones).*
 
 | Milestone | Status |
 |---|---|
@@ -16,7 +16,7 @@ Companion to the [product vision](../product-vision.md). The brand assets propos
 | M3: Rig | **Built**; the exit check (a character from a PSD rigged by a tester) and the reference-hardware benchmark are outstanding |
 | M4: Frame-by-frame and voice | **Built**; the exit check (a hand-drawn cycle and a lip-synced line exported to MP4 by a tester) is outstanding |
 | M5: Bring your files | **Built and released as the public alpha (0.1.0)**; the importer corpus measurement, code signing and the clean-machine exit check are outstanding |
-| M6: Harden | Not started: it is mostly the public beta, which runs for weeks with real users |
+| M6: Harden | **Started.** The Gate 1 tests that need no testers or reference hardware are automated or measured ([section 5.3](#53-results-so-far)); the public beta, which runs for weeks with real users, has not started |
 
 ### M0: Ground work (done)
 
@@ -627,7 +627,21 @@ Gate 1 is the exit from Phase 1. It is a release decision, not a date.
 | Licence audit | Every dependency and bundled font, library and model has a compatible licence recorded |
 | Legal review | Interface, naming and importers reviewed (required before 1.0 in the vision) |
 
-### 5.3 The test corpus
+### 5.3 Results so far
+
+Measured before the beta, on the Windows development laptop (Intel HD Graphics 520, 1366x768) unless stated. Gate 1 is decided on the reference hardware and the beta, so these show where things stand, not that a criterion is met.
+
+| Test | Result | How |
+|---|---|---|
+| Project open time | **Passes on the dev laptop.** A 5-minute scene (the benchmark character, 40 bones and 10 Smart Bones, keyed every 6 frames for 7,200 frames) loads and validates in 77 to 153 ms; from launching the app to the project on screen took 1.8 to 2.8 s, of which app start-up alone is 1.6 to 1.8 s | `fanimate-cli bench --seconds 300`; `fanimate-cli sample episode` opened in the app |
+| Crash recovery | **Passes, automated.** 100 of 100 processes killed outright at random moments (between or during journal writes) left a journal that opens cleanly with the last finished action or the one being written | `journal::tests::work_survives_100_kills_at_random_moments` |
+| File corruption | **Passes, automated, after fixes it found.** 3,000 damaged copies of five projects (every layer kind, both fixture versions) open, repair, evaluate, tessellate, take a new layer and save without a crash. Before the fixes, 46 crashed: shapes past the tessellator's range, lyon's variable-width stroker on strokes that double back, and layer ids at the top of the range | `crates/fanimate-cli/tests/damaged_projects.rs` |
+| Cross-platform parity | **Passes.** The benchmark render from the 0.2.0 release builds differs by at most 1/255 in any channel between Windows, macOS and Linux (0.5% of pixels differ by that 1 step) | `render-<platform>.png` artifacts of the release workflow |
+| Self-update | **Passes on Windows.** An installed 0.1.0 found 0.2.0, downloaded and verified it, installed it, restarted into it and removed the FFmpeg 0.1.0 had installed. macOS and the AppImage remain to be tried, and the clean-machine part of M5's exit check | By hand, 0.1.0 to 0.2.0 |
+| Licence audit | **Passes, automated.** All 501 crates that ship have an MIT/Apache-compatible licence; the record is [docs/legal/licences.md](../legal/licences.md) and `pnpm release` and CI fail on anything else | `scripts/licences.py --check` |
+| Performance budget, stability, Moho compatibility, usability, fresh install, legal review | Not yet measurable: they need the reference laptops, the beta's crash reports, the import corpus, testers, clean machines and counsel (section 4.1) | |
+
+### 5.4 The test corpus
 
 The 90% Moho compatibility target needs real files, so start collecting in M1.
 

@@ -71,6 +71,10 @@ impl fmt::Display for Report {
     }
 }
 
+/// The highest layer id a sound project holds. No project makes a billion
+/// layers, and the room above keeps new ids from overflowing.
+pub const MAX_LAYER_ID: u32 = 1 << 30;
+
 /// Check a document without changing it.
 pub fn validate(doc: &Document) -> Report {
     // The checks share one code path with repair; run it on a scratch copy.
@@ -170,32 +174,43 @@ impl Checker {
         }
     }
 
-    /// Layer ids must be unique, and `next_layer_id` must be above all of them.
+    /// Layer ids must be unique and at most [`MAX_LAYER_ID`], and
+    /// `next_layer_id` must be above all of them (and at most one more).
     fn layer_ids(&mut self, doc: &mut Document) {
         let mut seen = HashSet::new();
         let mut dupes = Vec::new();
+        let mut huge = Vec::new();
         let mut max = 0;
         doc.walk(|l| {
-            max = max.max(l.id.0);
+            if l.id.0 > MAX_LAYER_ID {
+                huge.push(l.id);
+            } else {
+                max = max.max(l.id.0);
+            }
             if !seen.insert(l.id) {
                 dupes.push(l.id);
             }
         });
-        if doc.next_layer_id <= max {
+        if doc.next_layer_id <= max || doc.next_layer_id > MAX_LAYER_ID + 1 {
             self.issue(
                 Severity::Error,
                 "document",
                 format!(
-                    "next layer id {} is not above the highest id {max}",
+                    "next layer id {} is not just above the highest id {max}",
                     doc.next_layer_id
                 ),
                 true,
             );
-            if self.repair {
-                doc.next_layer_id = max + 1;
-            }
         }
-        for id in &dupes {
+        for id in &huge {
+            self.issue(
+                Severity::Error,
+                &format!("layer {}", id.0),
+                "layer id is too large".into(),
+                true,
+            );
+        }
+        for id in dupes.iter().filter(|id| id.0 <= MAX_LAYER_ID) {
             self.issue(
                 Severity::Error,
                 &format!("layer {}", id.0),
@@ -203,17 +218,19 @@ impl Checker {
                 true,
             );
         }
-        if self.repair && !dupes.is_empty() {
-            // keep the first use of each id, renumber the rest
+        if self.repair {
+            // keep the first use of each sound id, renumber the rest
             let mut seen = HashSet::new();
-            let mut next = doc.next_layer_id.max(max + 1);
+            let mut next = max + 1;
             doc.walk_mut(|l| {
-                if !seen.insert(l.id) {
+                if l.id.0 > MAX_LAYER_ID || !seen.insert(l.id) {
                     l.id = LayerId(next);
                     next += 1;
                 }
             });
-            doc.next_layer_id = next;
+            if !(max + 1..=MAX_LAYER_ID + 1).contains(&doc.next_layer_id) || doc.next_layer_id < next {
+                doc.next_layer_id = next;
+            }
         }
     }
 
@@ -1017,6 +1034,25 @@ mod tests {
         assert!(report.unresolved_errors().count() > 0);
         repair(&mut doc);
         assert!(validate(&doc).is_clean(), "{}", validate(&doc));
+    }
+
+    /// Found by the damaged-project test: ids at the top of the range made
+    /// repair, and then the next new layer, overflow.
+    #[test]
+    fn huge_layer_ids_are_renumbered_with_room_for_more() {
+        for (layer_id, next) in [(u32::MAX, u32::MAX), (5, u32::MAX), (u32::MAX, 3)] {
+            let mut doc = samples::hello();
+            doc.layers[0].id = LayerId(layer_id);
+            doc.next_layer_id = next;
+            assert!(validate(&doc).unresolved_errors().count() > 0);
+            repair(&mut doc);
+            assert!(validate(&doc).is_clean(), "{}", validate(&doc));
+            let new = doc.new_layer_id();
+            let mut ids = Vec::new();
+            doc.walk(|l| ids.push(l.id));
+            assert!(!ids.contains(&new), "a new layer gets an unused id");
+            assert!(doc.next_layer_id <= MAX_LAYER_ID + 2);
+        }
     }
 
     #[test]

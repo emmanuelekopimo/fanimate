@@ -129,8 +129,9 @@ function checks() {
   const py = pythonCommand();
   if (py) {
     step('Brand tokens', `${py} brand/scripts/build_brand.py --check`);
+    step('Licences', `${py} scripts/licences.py --check`);
   } else {
-    console.warn('\nWarning: Python not found; skipping the brand token check (CI runs it).');
+    console.warn('\nWarning: Python not found; skipping the brand token and licence checks (CI runs them).');
   }
 }
 

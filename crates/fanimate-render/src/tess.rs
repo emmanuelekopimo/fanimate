@@ -1,6 +1,8 @@
 //! CPU tessellation of draw items into a triangle mesh.
 
 use fanimate_core::{Affine2, Color, Document, DrawItem, PathCmd, Vec2};
+use std::panic::AssertUnwindSafe;
+
 use lyon::math::point;
 use lyon::path::AttributeIndex;
 use lyon::path::Path as LyonPath;
@@ -11,6 +13,17 @@ use lyon::tessellation::{
 
 /// The path attribute holding the width profile.
 const WIDTH: AttributeIndex = 0;
+
+/// How far from the origin a point may be, in document units, and still be
+/// drawn: far beyond any canvas, and small enough that the tessellator's
+/// arithmetic stays finite. Damaged or wildly transformed shapes past it
+/// are skipped rather than drawn as NaN or crashing.
+const LIMIT: f32 = 1.0e7;
+
+/// The range of width profile values drawn. A profile scales the stroke
+/// width, so a sound one stays near 1. Zero is raised to a hairline: the
+/// stroker divides by the width at joins and would make NaN geometry.
+const WIDTH_SCALE: std::ops::RangeInclusive<f32> = 1.0e-3..=1.0e3;
 
 /// `[x, y, r, g, b, a, u, v]`: document-space position, linear
 /// premultiplied colour, and texture coordinate (0, 0 for flat colour). A
@@ -138,7 +151,16 @@ impl Tessellator {
                 .widths
                 .as_deref()
                 .filter(|w| w.len() == item.shape.path.on_curve_count());
-            self.build_path(&item.shape.path.cmds, item.transform, widths);
+            // approximate the transform's scale for the line width
+            let scale = item.transform.matrix2.determinant().abs().sqrt();
+            let line_width = style.stroke.map_or(0.0, |s| s.width * scale);
+            if !self.build_path(&item.shape.path.cmds, item.transform, widths) {
+                log::warn!(
+                    "\"{}\" is too far away or not a number; not drawn",
+                    item.shape.name
+                );
+                continue;
+            }
 
             if let Some(fill) = style.fill {
                 let c = color(self.tint.unwrap_or(fill).with_alpha(fill.a), item.opacity);
@@ -160,9 +182,11 @@ impl Tessellator {
                     self.tint.unwrap_or(stroke.color).with_alpha(stroke.color.a),
                     item.opacity,
                 );
-                // approximate the transform's scale for the line width
-                let scale = item.transform.matrix2.determinant().abs().sqrt();
-                let mut opts = StrokeOptions::tolerance(self.tolerance).with_line_width(stroke.width * scale);
+                if !(line_width.is_finite() && (0.0..=LIMIT).contains(&line_width)) {
+                    log::warn!("stroke of \"{}\" has no usable width", item.shape.name);
+                    continue;
+                }
+                let mut opts = StrokeOptions::tolerance(self.tolerance).with_line_width(line_width);
                 if widths.is_some() {
                     // brush strokes: width from the profile, rounded like ink
                     opts = opts
@@ -170,24 +194,78 @@ impl Tessellator {
                         .with_line_cap(LineCap::Round)
                         .with_line_join(LineJoin::Round);
                 }
-                let result = self.stroke.tessellate_path(
-                    &self.path,
-                    &opts,
-                    &mut BuffersBuilder::new(mesh, |v: StrokeVertex| {
-                        let p = v.position();
-                        [p.x, p.y, c[0], c[1], c[2], c[3], 0.0, 0.0]
-                    }),
-                );
-                if let Err(e) = result {
-                    log::warn!("stroke of \"{}\" failed: {e:?}", item.shape.name);
+                if !self.stroke_checked(mesh, &opts, c) && widths.is_some() {
+                    // the stroker cannot follow some sharp turns at varying
+                    // widths; an even width it always can
+                    let even = StrokeOptions::tolerance(self.tolerance)
+                        .with_line_width(line_width)
+                        .with_line_cap(LineCap::Round)
+                        .with_line_join(LineJoin::Round);
+                    if !self.stroke_checked(mesh, &even, c) {
+                        log::warn!("stroke of \"{}\" could not be drawn", item.shape.name);
+                    }
                 }
             }
         }
     }
 
+    /// Stroke the current path into `mesh` in colour `c`. Returns whether
+    /// it worked; if not, `mesh` is left as it was. lyon asserts (in debug
+    /// builds) or writes NaN positions (in release builds) on some
+    /// variable-width strokes that turn back on themselves, so both are
+    /// caught here rather than reaching the screen.
+    fn stroke_checked(&mut self, mesh: &mut Mesh, opts: &StrokeOptions, c: [f32; 4]) -> bool {
+        let (vertices, indices) = (mesh.vertices.len(), mesh.indices.len());
+        let (stroke, path) = (&mut self.stroke, &self.path);
+        let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+            stroke.tessellate_path(
+                path,
+                opts,
+                &mut BuffersBuilder::new(&mut *mesh, |v: StrokeVertex| {
+                    let p = v.position();
+                    [p.x, p.y, c[0], c[1], c[2], c[3], 0.0, 0.0]
+                }),
+            )
+        }));
+        let sound = match result {
+            Ok(Ok(_)) => mesh.vertices[vertices..]
+                .iter()
+                .all(|v| v[0].is_finite() && v[1].is_finite()),
+            Ok(Err(e)) => {
+                log::warn!("stroke failed: {e:?}");
+                false
+            }
+            Err(_) => {
+                // its state after a panic is unknown: start a fresh one
+                self.stroke = StrokeTessellator::new();
+                false
+            }
+        };
+        if !sound {
+            mesh.vertices.truncate(vertices);
+            mesh.indices.truncate(indices);
+        }
+        sound
+    }
+
     /// Convert our commands to a lyon path in document space, with the
     /// width profile (1 everywhere without one) as attribute [`WIDTH`].
-    fn build_path(&mut self, cmds: &[PathCmd], t: Affine2, widths: Option<&[f32]>) {
+    /// Returns false, leaving no path, when a point lands past [`LIMIT`] or
+    /// is not a number.
+    fn build_path(&mut self, cmds: &[PathCmd], t: Affine2, widths: Option<&[f32]>) -> bool {
+        let usable = |v: Vec2| {
+            let w = t.transform_point2(v);
+            w.is_finite() && w.abs().max_element() <= LIMIT
+        };
+        let all_usable = cmds.iter().all(|cmd| match *cmd {
+            PathCmd::MoveTo(v) | PathCmd::LineTo(v) => usable(v),
+            PathCmd::CubicTo(c1, c2, v) => usable(c1) && usable(c2) && usable(v),
+            PathCmd::Close => true,
+        });
+        if !all_usable {
+            self.path = LyonPath::new();
+            return false;
+        }
         let p = |v: Vec2| {
             let w = t.transform_point2(v);
             point(w.x, w.y)
@@ -199,7 +277,11 @@ impl Tessellator {
         let mut width = || {
             let w = widths.and_then(|w| w.get(n)).copied().unwrap_or(1.0);
             n += 1;
-            [if w.is_finite() { w.max(0.0) } else { 1.0 }]
+            [if w.is_finite() {
+                w.clamp(*WIDTH_SCALE.start(), *WIDTH_SCALE.end())
+            } else {
+                1.0
+            }]
         };
         for cmd in cmds {
             match *cmd {
@@ -234,6 +316,7 @@ impl Tessellator {
             b.end(false);
         }
         self.path = b.build();
+        true
     }
 }
 
@@ -303,6 +386,71 @@ mod tests {
     fn mismatched_width_profile_draws_a_plain_stroke() {
         let mesh = stroke_mesh(Some(vec![0.1]));
         assert!((half_height(&mesh, -1.0..=1.0) - 5.0).abs() < 0.3);
+    }
+
+    fn mesh_of(shape: &fanimate_core::Shape, transform: Affine2) -> Mesh {
+        let item = DrawItem {
+            layer: fanimate_core::LayerId(1),
+            index: 0,
+            shape: std::borrow::Cow::Borrowed(shape),
+            part: None,
+            image: None,
+            transform,
+            opacity: 1.0,
+        };
+        let mut mesh = Mesh::new();
+        Tessellator::new().draw_items(&[item], &mut mesh);
+        mesh
+    }
+
+    /// A brush stroke that turns straight back on itself, which lyon's
+    /// variable-width stroker cannot follow (found by the damaged-project
+    /// test): drawn at an even width instead, never as NaN or a panic.
+    #[test]
+    fn a_stroke_that_doubles_back_still_draws() {
+        use fanimate_core::{Path, Shape, Style};
+        let path = Path::new().move_to(Vec2::new(200.0, 500.0)).cubic_to(
+            Vec2::new(200.83, 500.82),
+            Vec2::new(203.33, 0.0),
+            Vec2::new(205.0, 504.95),
+        );
+        let mut shape = Shape::new("spike", path, Style::default().with_stroke(Color::BLACK, 8.0));
+        shape.widths = Some(vec![0.0365, 0.534]);
+        let mesh = mesh_of(&shape, Affine2::IDENTITY);
+        assert!(!mesh.indices.is_empty(), "drawn");
+        assert!(mesh.vertices.iter().all(|v| v[0].is_finite() && v[1].is_finite()));
+        let n = mesh.vertices.len() as u32;
+        assert!(mesh.indices.iter().all(|&i| i < n));
+    }
+
+    /// Points that are not numbers, or too far out for the tessellator's
+    /// arithmetic, skip the shape instead of crashing.
+    #[test]
+    fn unusable_points_skip_the_shape() {
+        use fanimate_core::{Path, Shape, Style};
+        let style = Style::fill(Color::WHITE).with_stroke(Color::BLACK, 2.0);
+        for far in [f32::INFINITY, f32::NAN, 1.0e30] {
+            let path = Path::new()
+                .move_to(Vec2::ZERO)
+                .line_to(Vec2::new(far, 10.0))
+                .line_to(Vec2::new(10.0, 10.0))
+                .close();
+            let mesh = mesh_of(&Shape::new("far", path, style), Affine2::IDENTITY);
+            assert!(mesh.indices.is_empty(), "{far} is not drawn");
+        }
+        // a sound shape moved out of range by its transform is skipped too
+        let path = Path::new()
+            .move_to(Vec2::ZERO)
+            .line_to(Vec2::new(10.0, 0.0))
+            .line_to(Vec2::new(10.0, 10.0))
+            .close();
+        let shape = Shape::new("near", path, style);
+        assert!(
+            mesh_of(&shape, Affine2::from_scale(Vec2::splat(1.0e30)))
+                .indices
+                .is_empty()
+        );
+        assert!(!mesh_of(&shape, Affine2::IDENTITY).indices.is_empty());
     }
 
     #[test]

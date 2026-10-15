@@ -68,7 +68,9 @@ impl Document {
     /// Allocate a fresh layer id.
     pub fn new_layer_id(&mut self) -> LayerId {
         let id = LayerId(self.next_layer_id);
-        self.next_layer_id += 1;
+        // the validator keeps ids far below this; saturating means a
+        // damaged count can never crash the editor
+        self.next_layer_id = self.next_layer_id.saturating_add(1);
         id
     }
 

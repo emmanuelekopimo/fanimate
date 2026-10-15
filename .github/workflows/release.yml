@@ -35,6 +35,8 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
+      - name: Licences (no GPL or LGPL dependency)
+        run: python3 scripts/licences.py --check
       - name: WebAssembly build (engine crates)
         run: cargo check -p fanimate-core -p fanimate-fnm -p fanimate-editor -p fanimate-render -p fanimate-import --target wasm32-unknown-unknown
       - name: Headless render smoke test
